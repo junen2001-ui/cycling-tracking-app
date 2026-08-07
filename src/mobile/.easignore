@@ -1,0 +1,35 @@
+# EAS Build archive ignore rules.
+# Deliberately does NOT exclude .env, unlike .gitignore, so
+# EXPO_PUBLIC_API_BASE_URL gets baked into preview/production builds
+# (the JS bundle is compiled in the cloud for those profiles, with no
+# local Metro server to supply it at runtime).
+
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+.metro-health-check*
+
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+.DS_Store
+*.pem
+
+.env*.local
+
+*.tsbuildinfo
+
+/ios
+/android

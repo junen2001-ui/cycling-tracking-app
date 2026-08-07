@@ -1,0 +1,16 @@
+version: '3.9'
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: cycling-tracking-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cycling_tracking
+    ports:
+      - "5432:5432"
+    volumes:
+      - cycling_tracking_pgdata:/var/lib/postgresql/data
+
+volumes:
+  cycling_tracking_pgdata:

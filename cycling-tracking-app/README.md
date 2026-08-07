@@ -59,8 +59,19 @@ iOSはまだ未対応です(実機インストールには有料のApple Develop
 - モバイルアプリをビルドする場合は、ローカルにAndroid SDK等は不要(EASのクラウドビルドを使うため)。ただし `npx eas-cli login` で既存のExpoアカウント(owner: `endy_jun`)にログインする必要がある。
 
 ### 2. コードを新しいPCに持ってくる
-- **そのままOneDriveの同期を待つ場合**: 追加作業はほぼ不要(`.env` や `node_modules` もそのまま複製される)が、**2台のPCで同時に編集・実行しない**こと。片方のPCでの変更がOneDrive上で「同期済み」になってから、もう片方のPCで作業を始めること。
-- **GitHubなどにリモートリポジトリを作る場合(推奨)**: `git remote add origin <URL>` → `git push -u origin master` でこのPCから履歴を送り、新しいPCでは `git clone <URL>` するか、既存のOneDrive同期フォルダに対して `git remote add`/`git pull` する。`.env` はGit管理対象外(秘密情報のため)なので、`src/server/.env.example` / `src/mobile/.env.example` をコピーして値を入力し直す(値そのものは安全な方法で個別に転送すること)。
+- **日常的な引き継ぎはOneDriveの同期に依存する**(追加作業はほぼ不要。`.env` や `node_modules` もそのまま複製される)。ただし**2台のPCで同時に編集・実行しない**こと。片方のPCでの変更がOneDrive上で「同期済み」になってから、もう片方のPCで作業を始めること。
+- **GitHubにも定期的にバックアップ・同期している(2026-08-07に設定済み)**: このリポジトリ(`cycling-tracking-app`フォルダ)は、`OneDrive/AI/Claude` 全体を管理するGitリポジトリの一部(サブディレクトリ)になっている。他の無関係なプロジェクト(SBI-investment-tracker等)を含めずに `cycling-tracking-app` フォルダだけをGitHubのプライベートリポジトリ(`https://github.com/junen2001-ui/cycling-tracking-app`)に反映するため、通常の `git push` ではなく **`git subtree` を使う**:
+  ```
+  # OneDrive/AI/Claude ディレクトリ(cycling-tracking-appの一つ上の階層)で実行する
+  git add cycling-tracking-app
+  git commit -m "..."
+  git subtree push --prefix=cycling-tracking-app origin master
+  ```
+  新しいPC側で最新版を取得する場合(通常はOneDrive同期で十分だが、GitHub側にしか無い変更を取り込みたい場合):
+  ```
+  git subtree pull --prefix=cycling-tracking-app origin master --squash
+  ```
+  `.env` はGit管理対象外(秘密情報のため、`.gitignore`で除外)なので、GitHub経由では引き継がれない。OneDriveの同期に含まれる実ファイルをそのまま使うか、`src/server/.env.example` / `src/mobile/.env.example` をコピーして値を入力し直すこと。
 
 ### 3. Dockerコンテナ(DB)を作り直す
 ```

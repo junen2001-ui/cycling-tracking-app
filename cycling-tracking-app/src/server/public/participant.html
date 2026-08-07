@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cycling Participant</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f7f7f7; color: #222; }
+    .app { max-width: 480px; margin: 0 auto; padding: 24px 16px 40px; }
+    .screen { display: none; }
+    .screen.active { display: block; }
+    .card { background: white; border-radius: 16px; padding: 20px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); margin-bottom: 16px; }
+    button { width: 100%; padding: 14px; border: none; border-radius: 999px; font-size: 1rem; font-weight: bold; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .primary { background: #1a73e8; color: white; }
+    .danger { background: #d93025; color: white; }
+    .secondary { background: #eee; color: #333; }
+    .link-btn { background: none; color: #1a73e8; font-weight: normal; padding: 8px; width: auto; }
+    .status { font-size: 0.95rem; color: #666; margin-top: 8px; }
+    .pill { display: inline-block; padding: 6px 10px; border-radius: 999px; font-size: 0.85rem; background: #eef6ff; color: #0b57d0; }
+    .pill.stalled { background: #fff4e5; color: #b06000; }
+    .pill.offline { background: #f1f1f1; color: #777; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .error-text { color: #d93025; font-size: 0.9rem; margin-top: 8px; min-height: 1.2em; }
+    .hint-text { color: #888; font-size: 0.85rem; margin-top: 8px; }
+    input[type="tel"], input[type="text"] {
+      width: 100%; box-sizing: border-box; padding: 12px; font-size: 1rem;
+      border: 1px solid #ccc; border-radius: 8px; margin-top: 8px;
+    }
+    label { font-weight: bold; font-size: 0.9rem; }
+    .splash-title { text-align: center; margin-top: 30vh; }
+    .banner { padding: 10px 14px; border-radius: 8px; font-size: 0.9rem; margin-bottom: 16px; }
+    .banner.offline { background: #fff4e5; color: #8a5300; }
+    .row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+    .switch { position: relative; display: inline-block; width: 46px; height: 26px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; inset: 0; background-color: #ccc; border-radius: 999px; transition: 0.2s; }
+    .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.2s; }
+    input:checked + .slider { background-color: #1a73e8; }
+    input:checked + .slider:before { transform: translateX(20px); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Splash screen -->
+    <section id="screen-splash" class="screen active">
+      <div class="splash-title">
+        <h1>サイクリング参加者</h1>
+        <p class="muted" id="splash-message">読み込み中...</p>
+      </div>
+    </section>
+
+    <!-- Auth screen -->
+    <section id="screen-auth" class="screen">
+      <div class="card" id="auth-step-phone">
+        <h1>ログイン</h1>
+        <p class="muted">電話番号を入力して認証コードを受け取ってください。</p>
+        <label for="phone-input">電話番号</label>
+        <input type="tel" id="phone-input" placeholder="090-1234-5678" autocomplete="tel" />
+        <div class="error-text" id="phone-error"></div>
+        <div style="margin-top: 16px;">
+          <button class="primary" id="send-code-btn">認証コードを送信</button>
+        </div>
+      </div>
+      <div class="card" id="auth-step-code" hidden>
+        <h1>認証コード入力</h1>
+        <p class="muted" id="code-target-text">SMSで送信されたコードを入力してください。</p>
+        <label for="code-input">認証コード(6桁)</label>
+        <input type="text" id="code-input" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code" />
+        <div class="error-text" id="code-error"></div>
+        <div class="hint-text" id="code-hint"></div>
+        <div style="margin-top: 16px;">
+          <button class="primary" id="verify-code-btn">確認して続ける</button>
+          <button class="link-btn" id="back-to-phone-btn" type="button">電話番号を変更する</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live screen -->
+    <section id="screen-live" class="screen">
+      <div class="banner offline" id="offline-banner" hidden>サーバーとの接続が切れています。再接続を試みています...</div>
+      <div class="card">
+        <h1>サイクリング参加者</h1>
+        <div id="participant-id" class="muted">ID: -</div>
+        <div class="status" id="status-text">状態: 待機中</div>
+        <div style="margin-top: 8px;"><span id="status-pill" class="pill offline">unknown</span></div>
+      </div>
+      <div class="card">
+        <div class="row">
+          <label for="auto-send-toggle">位置情報を自動送信</label>
+          <label class="switch">
+            <input type="checkbox" id="auto-send-toggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="muted" id="location-status" style="margin-top: 12px;">まだ送信していません。</div>
+        <div class="error-text" id="location-error"></div>
+        <div style="margin-top: 12px;">
+          <button class="secondary" id="send-location-btn">今すぐ位置を送信</button>
+        </div>
+      </div>
+      <div class="card">
+        <button class="danger" id="send-incident-btn">緊急ボタン</button>
+        <p class="muted" style="margin-top: 8px;">緊急時は管理側へ通知を送信します。誤って押さないようご注意ください。</p>
+        <div class="error-text" id="incident-error"></div>
+      </div>
+      <div class="card">
+        <a id="phone-link" href="tel:" style="text-decoration:none;">
+          <button class="secondary" type="button">運営本部に電話する</button>
+        </a>
+      </div>
+      <button class="link-btn" id="logout-btn" type="button">ログアウトして電話番号を変更する</button>
+    </section>
+  </div>
+  <script src="participant.js"></script>
+</body>
+</html>

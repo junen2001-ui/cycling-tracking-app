@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>サイクリング追跡 管理画面</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <style>
+    body { margin: 0; font-family: "Hiragino Sans", "Yu Gothic", Arial, sans-serif; }
+    #map { height: calc(100vh - 280px); width: 100%; }
+    header {
+      padding: 16px;
+      background: #1a73e8;
+      color: white;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    header h1 { margin: 0; font-size: 1.4rem; }
+    .header-main { flex: 1; min-width: 200px; }
+    .status { margin-top: 8px; font-size: 0.95rem; }
+    .status span { font-weight: bold; }
+    .geo-note { margin-top: 4px; font-size: 0.85rem; color: #ffe6b3; }
+    .gpx-button {
+      background: white;
+      color: #1a73e8;
+      border: none;
+      border-radius: 999px;
+      padding: 8px 16px;
+      font-size: 0.9rem;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .panels {
+      display: flex;
+      gap: 16px;
+      padding: 16px;
+      background: #ffffff;
+      border-bottom: 1px solid #e0e0e0;
+      flex-wrap: wrap;
+    }
+    .panel {
+      flex: 1;
+      min-width: 260px;
+    }
+    .panel-header {
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+    .alert-list,
+    .stalled-list,
+    .roster-list {
+      display: grid;
+      gap: 8px;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .roster-row {
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #f7f9fc;
+      border: 1px solid #e3e8f0;
+      cursor: pointer;
+    }
+    .roster-row:hover {
+      background: #eef2fa;
+    }
+    .roster-name-input {
+      flex: 1;
+      min-width: 0;
+      border: 1px solid transparent;
+      background: transparent;
+      font-size: 0.95rem;
+      font-weight: bold;
+      padding: 4px 6px;
+      border-radius: 4px;
+      color: #1a2b4c;
+    }
+    .roster-name-input:hover,
+    .roster-name-input:focus {
+      border-color: #b8c4d9;
+      background: white;
+    }
+    .roster-meta {
+      font-size: 0.8rem;
+      color: #556;
+      text-align: right;
+      flex-shrink: 0;
+      line-height: 1.4;
+    }
+    .roster-status.stalled {
+      color: #b06000;
+      font-weight: bold;
+    }
+    .roster-empty {
+      color: #666;
+      font-size: 0.95rem;
+    }
+    .alert-card,
+    .rest-area-card,
+    .stalled-card {
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .alert-card {
+      background: #fff4f4;
+      border: 1px solid #ffcccc;
+      color: #660000;
+    }
+    .rest-area-card {
+      background: #f4fbff;
+      border: 1px solid #cce7ff;
+      color: #003f66;
+    }
+    .stalled-card {
+      background: #fff8e1;
+      border: 1px solid #ffe0a3;
+      color: #7a4f00;
+      cursor: pointer;
+    }
+    .stalled-card:hover {
+      background: #ffefc7;
+    }
+    .card-body { flex: 1; min-width: 0; }
+    .alert-card b,
+    .rest-area-card b,
+    .stalled-card b {
+      display: inline-block;
+      margin-bottom: 4px;
+    }
+.alert-card,
+    .rest-area-card {
+      cursor: pointer;
+    }
+    .dismiss-button {
+      border: none;
+      background: rgba(0, 0, 0, 0.08);
+      color: inherit;
+      border-radius: 999px;
+      width: 16px;
+      height: 16px;
+      line-height: 16px;
+      text-align: center;
+      cursor: pointer;
+      font-size: 0.6rem;
+      flex-shrink: 0;
+      padding: 0;
+    }
+    .dismiss-button:hover {
+      background: rgba(0, 0, 0, 0.18);
+    }
+    .alert-empty,
+    .stalled-empty {
+      color: #666;
+      font-size: 0.95rem;
+    }
+    #import-dialog,
+    #rest-area-dialog {
+      border: none;
+      border-radius: 10px;
+      padding: 0;
+      width: min(480px, 90vw);
+    }
+    #import-dialog::backdrop,
+    #rest-area-dialog::backdrop {
+      background: rgba(0, 0, 0, 0.4);
+    }
+    .import-dialog-inner {
+      padding: 20px;
+      display: grid;
+      gap: 14px;
+      font-size: 0.95rem;
+      color: #1a2b4c;
+    }
+    .import-dialog-inner h2 {
+      margin: 0;
+      font-size: 1.1rem;
+    }
+    .import-field label {
+      display: block;
+      margin-bottom: 4px;
+      font-weight: bold;
+    }
+    .import-field select,
+    .import-field input {
+      width: 100%;
+      padding: 6px;
+      font-size: 0.95rem;
+      box-sizing: border-box;
+    }
+    .import-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .import-dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .import-dialog-actions button {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      background: white;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .import-dialog-actions button.primary {
+      background: #1a73e8;
+      color: white;
+      border-color: #1a73e8;
+    }
+    .import-result {
+      background: #f4fbff;
+      border: 1px solid #cce7ff;
+      border-radius: 6px;
+      padding: 10px;
+      font-size: 0.9rem;
+      white-space: pre-line;
+    }
+    .import-error {
+      color: #b00020;
+      font-size: 0.9rem;
+    }
+    .rest-area-coords {
+      font-size: 0.85rem;
+      color: #556;
+    }
+    .rest-area-delete-button {
+      margin-top: 6px;
+      padding: 4px 10px;
+      border: 1px solid #b00020;
+      color: #b00020;
+      background: white;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .rest-area-delete-button:hover {
+      background: #fff0f0;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-main">
+      <h1>サイクリング追跡 管理画面</h1>
+      <div class="status">通信状態: <span id="ws-status">接続中...</span> | 参加者数: <span id="participant-count">0</span></div>
+      <div class="geo-note" id="geo-note" hidden></div>
+      <div class="geo-note" id="rest-area-note" hidden>地図をクリックして休憩所の中心位置を指定してください(もう一度ボタンを押すとキャンセルします)</div>
+    </div>
+    <div>
+      <button class="gpx-button" id="gpx-button" type="button">GPXファイルを読み込む</button>
+      <input type="file" id="gpx-input" accept=".gpx" hidden />
+      <button class="gpx-button" id="import-button" type="button">Excelインポート</button>
+      <input type="file" id="import-input" accept=".xlsx,.xls" hidden />
+      <button class="gpx-button" id="rest-area-button" type="button">休憩所を追加</button>
+    </div>
+  </header>
+  <section class="panels">
+    <div class="panel">
+      <div class="panel-header">
+        アラート・イベント (<span id="alert-count">0</span>)
+      </div>
+      <div id="alert-list" class="alert-list">
+        <div class="alert-empty">現在アラートはありません</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        停滞中の参加者 (<span id="stalled-count">0</span>)
+      </div>
+      <div id="stalled-list" class="stalled-list">
+        <div class="stalled-empty">停滞中の参加者はいません</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        参加者一覧 (<span id="roster-count">0</span>)
+      </div>
+      <div id="roster-list" class="roster-list">
+        <div class="roster-empty">参加者はいません</div>
+      </div>
+    </div>
+  </section>
+  <div id="map"></div>
+
+  <dialog id="rest-area-dialog">
+    <div class="import-dialog-inner">
+      <h2>休憩所を追加</h2>
+      <div class="rest-area-coords">中心座標: <span id="rest-area-coords">-</span></div>
+      <div class="import-field">
+        <label for="rest-area-name">名前</label>
+        <input type="text" id="rest-area-name" placeholder="例: 休憩所A" />
+      </div>
+      <div class="import-field">
+        <label for="rest-area-width">幅 (m)</label>
+        <input type="number" id="rest-area-width" min="10" step="10" value="100" />
+      </div>
+      <div class="import-field">
+        <label for="rest-area-height">高さ (m)</label>
+        <input type="number" id="rest-area-height" min="10" step="10" value="100" />
+      </div>
+      <div id="rest-area-error" class="import-error" hidden></div>
+      <div class="import-dialog-actions">
+        <button type="button" id="rest-area-cancel-button">キャンセル</button>
+        <button type="button" id="rest-area-submit-button" class="primary">登録</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="import-dialog">
+    <div class="import-dialog-inner">
+      <h2>Excelから参加者をインポート</h2>
+      <div class="import-checkbox">
+        <input type="checkbox" id="import-has-header" checked />
+        <label for="import-has-header">1行目は見出し行</label>
+      </div>
+      <div class="import-field">
+        <label for="import-name-column">名前の列</label>
+        <select id="import-name-column"></select>
+      </div>
+      <div class="import-field">
+        <label for="import-phone-column">電話番号の列</label>
+        <select id="import-phone-column"></select>
+      </div>
+      <div id="import-error" class="import-error" hidden></div>
+      <div id="import-result" class="import-result" hidden></div>
+      <div class="import-dialog-actions">
+        <button type="button" id="import-cancel-button">閉じる</button>
+        <button type="button" id="import-submit-button" class="primary">インポート実行</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js" integrity="sha256-yVBhl8r4CaB1tt7h2g02+xnacVj/6KiOewyWxdhiPJk=" crossorigin=""></script>
+  <script src="admin.js"></script>
+</body>
+</html>

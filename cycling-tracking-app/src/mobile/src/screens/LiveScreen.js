@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
-import { styles } from '../styles';
+import { styles, colors } from '../styles';
 import { ORGANIZER_PHONE, INCIDENT_COOLDOWN_MS } from '../config';
 
 export default function LiveScreen({
@@ -17,7 +17,6 @@ export default function LiveScreen({
   onSendIncident,
   incidentError,
   onLogout,
-  onOpenGoogleMaps,
   onShowRouteMap,
 }) {
   const [incidentCooldownUntil, setIncidentCooldownUntil] = useState(0);
@@ -55,16 +54,24 @@ export default function LiveScreen({
       <View style={styles.card}>
         <Text style={styles.title}>サイクリング参加者</Text>
         <Text style={styles.muted}>ID: {participantId || '-'}</Text>
-        <Text style={styles.statusText}>状態: {statusLabel}</Text>
-        <View style={[styles.pill, stalled ? styles.pillStalled : styles.pillActive]}>
-          <Text style={[styles.pillText, stalled && styles.pillTextStalled]}>{pillLabel}</Text>
+        <View style={styles.row}>
+          <Text style={[styles.statusText, { marginTop: 0 }]}>状態: {statusLabel}</Text>
+          <View style={[styles.pill, stalled ? styles.pillStalled : styles.pillActive, { marginTop: 0 }]}>
+            <Text style={[styles.pillText, stalled && styles.pillTextStalled]}>{pillLabel}</Text>
+          </View>
         </View>
       </View>
 
       <View style={styles.card}>
         <View style={styles.row}>
-          <Text style={styles.label}>位置情報を自動送信(バックグラウンド含む)</Text>
-          <Switch value={autoSendEnabled} onValueChange={onToggleAutoSend} />
+          <Text style={[styles.label, { flex: 1, marginRight: 12 }]}>位置情報を自動的に送信</Text>
+          <Switch
+            value={autoSendEnabled}
+            onValueChange={onToggleAutoSend}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor="#fff"
+            ios_backgroundColor={colors.border}
+          />
         </View>
         <Text style={[styles.muted, { marginTop: 12, textAlign: 'left' }]}>
           {locationStatusText || 'まだ送信していません。'}
@@ -89,7 +96,7 @@ export default function LiveScreen({
 
       <View style={styles.card}>
         <Pressable
-          style={[styles.button, styles.dangerButton, incidentDisabled && styles.buttonDisabled]}
+          style={[styles.button, styles.dangerButton, { marginTop: 0 }, incidentDisabled && styles.buttonDisabled]}
           onPress={handleIncident}
           disabled={incidentDisabled}
         >
@@ -103,16 +110,10 @@ export default function LiveScreen({
 
       <View style={styles.card}>
         <Pressable
-          style={[styles.button, styles.secondaryButton]}
+          style={[styles.button, styles.secondaryButton, { marginTop: 0 }]}
           onPress={() => Linking.openURL(`tel:${ORGANIZER_PHONE}`)}
         >
           <Text style={styles.secondaryButtonText}>運営本部に電話する</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.card}>
-        <Pressable style={[styles.button, styles.secondaryButton]} onPress={onOpenGoogleMaps}>
-          <Text style={styles.secondaryButtonText}>現在地をGoogleマップで開く</Text>
         </Pressable>
         <Pressable style={[styles.button, styles.secondaryButton, { marginTop: 8 }]} onPress={onShowRouteMap}>
           <Text style={styles.secondaryButtonText}>ルート地図を表示</Text>

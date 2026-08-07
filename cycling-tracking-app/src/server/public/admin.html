@@ -6,10 +6,16 @@
   <title>サイクリング追跡 管理画面</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <style>
-    body { margin: 0; font-family: "Hiragino Sans", "Yu Gothic", Arial, sans-serif; }
-    #map { height: calc(100vh - 280px); width: 100%; }
+    html, body { margin: 0; height: 100%; font-family: "Hiragino Sans", "Yu Gothic", Arial, sans-serif; }
+    body { display: flex; flex-direction: column; overflow: hidden; }
+    #map { flex: 1; width: 100%; min-width: 0; }
+    .main-content {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
     header {
-      padding: 16px;
+      padding: 10px 16px;
       background: #1a73e8;
       color: white;
       display: flex;
@@ -17,10 +23,11 @@
       align-items: flex-start;
       flex-wrap: wrap;
       gap: 12px;
+      flex-shrink: 0;
     }
-    header h1 { margin: 0; font-size: 1.4rem; }
+    header h1 { margin: 0; font-size: 1.2rem; }
     .header-main { flex: 1; min-width: 200px; }
-    .status { margin-top: 8px; font-size: 0.95rem; }
+    .status { margin-top: 4px; font-size: 0.9rem; }
     .status span { font-weight: bold; }
     .geo-note { margin-top: 4px; font-size: 0.85rem; color: #ffe6b3; }
     .gpx-button {
@@ -35,26 +42,34 @@
     }
     .panels {
       display: flex;
-      gap: 16px;
-      padding: 16px;
+      flex-direction: column;
+      gap: 12px;
+      padding: 12px;
       background: #ffffff;
-      border-bottom: 1px solid #e0e0e0;
-      flex-wrap: wrap;
+      border-left: 1px solid #e0e0e0;
+      flex-shrink: 0;
+      width: 300px;
+      overflow: hidden;
     }
     .panel {
       flex: 1;
-      min-width: 260px;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
     }
     .panel-header {
       font-weight: bold;
       margin-bottom: 8px;
+      flex-shrink: 0;
     }
     .alert-list,
     .stalled-list,
     .roster-list {
       display: grid;
+      align-content: start;
       gap: 8px;
-      max-height: 180px;
+      flex: 1;
+      min-height: 0;
       overflow-y: auto;
     }
     .roster-row {
@@ -250,6 +265,28 @@
     .rest-area-delete-button:hover {
       background: #fff0f0;
     }
+
+    /* スマホなど画面幅が狭い場合は、サイドバー表示ではなく地図+パネルの縦積みに切り替える */
+    @media (max-width: 860px) {
+      html, body { height: auto; }
+      body { overflow: auto; }
+      .main-content { flex-direction: column; }
+      #map { flex: none; height: 50vh; min-height: 280px; }
+      .panels {
+        width: 100%;
+        flex-direction: column;
+        border-left: none;
+        border-top: 1px solid #e0e0e0;
+        overflow: visible;
+      }
+      .panel { flex: none; }
+      .alert-list,
+      .stalled-list,
+      .roster-list {
+        flex: none;
+        max-height: 220px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -268,33 +305,35 @@
       <button class="gpx-button" id="rest-area-button" type="button">休憩所を追加</button>
     </div>
   </header>
-  <section class="panels">
-    <div class="panel">
-      <div class="panel-header">
-        アラート・イベント (<span id="alert-count">0</span>)
+  <div class="main-content">
+    <div id="map"></div>
+    <section class="panels">
+      <div class="panel">
+        <div class="panel-header">
+          アラート・イベント (<span id="alert-count">0</span>)
+        </div>
+        <div id="alert-list" class="alert-list">
+          <div class="alert-empty">現在アラートはありません</div>
+        </div>
       </div>
-      <div id="alert-list" class="alert-list">
-        <div class="alert-empty">現在アラートはありません</div>
+      <div class="panel">
+        <div class="panel-header">
+          停滞中の参加者 (<span id="stalled-count">0</span>)
+        </div>
+        <div id="stalled-list" class="stalled-list">
+          <div class="stalled-empty">停滞中の参加者はいません</div>
+        </div>
       </div>
-    </div>
-    <div class="panel">
-      <div class="panel-header">
-        停滞中の参加者 (<span id="stalled-count">0</span>)
+      <div class="panel">
+        <div class="panel-header">
+          参加者一覧 (<span id="roster-count">0</span>)
+        </div>
+        <div id="roster-list" class="roster-list">
+          <div class="roster-empty">参加者はいません</div>
+        </div>
       </div>
-      <div id="stalled-list" class="stalled-list">
-        <div class="stalled-empty">停滞中の参加者はいません</div>
-      </div>
-    </div>
-    <div class="panel">
-      <div class="panel-header">
-        参加者一覧 (<span id="roster-count">0</span>)
-      </div>
-      <div id="roster-list" class="roster-list">
-        <div class="roster-empty">参加者はいません</div>
-      </div>
-    </div>
-  </section>
-  <div id="map"></div>
+    </section>
+  </div>
 
   <dialog id="rest-area-dialog">
     <div class="import-dialog-inner">

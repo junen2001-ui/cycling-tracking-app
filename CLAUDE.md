@@ -23,16 +23,22 @@
 ## 次に取り組むこと
 - `src/mobile`(参加者アプリ)の3件の不具合修正・地図機能とも実機検証まで完了(2026-08-06)。残るはiOSビルド/検証(有料のApple Developerアカウントが必要)のみ。
 - 管理画面(`admin.html`/`admin.js`)の拡張(日本語化・GPXルート表示・現在地初期表示・アラート/停滞一覧の消去)も実装・Playwright検証まで完了(2026-08-06)。詳細は `progress/progress.md` セクション11参照。
-- バックエンドの公開デプロイ(Oracle Cloud無料枠でのPoC公開)はユーザーの指示で保留中。
-- 実際のイベントで使う前に対応が必要な項目(バックエンドの公開HTTPS化、認証トークンの有効期限)は `progress/progress.md` の「Action Items」を参照。
+- バックエンドの公開デプロイ(Oracle Cloud無料枠)は2026-08-07に完了。`https://217-142-249-10.nip.io` で稼働中。詳細は `progress/progress.md` の同日セクション参照。
+- **11月の実イベント利用前に必須**: 管理画面・関連APIに認証が一切無く、公開URLになった今は誰でも参加者の個人情報閲覧・データ改変が可能な状態(PoC期間中はユーザー判断で現状のまま運用)。認証トークンの有効期限が無い点も合わせて `progress/progress.md` の「Action Items」を参照。
+
+## バックエンドの公開デプロイ (Oracle Cloud, 2026-08-07)
+- Oracle Cloud無料枠(Always Free)の`VM.Standard.E2.1.Micro`(ap-osaka-1、パブリックIP `217.142.249.10`)にデプロイ済み。Docker(PostgreSQL/PostGIS、`127.0.0.1`のみバインド)+ Node.js(systemdサービス`cycling-tracking`)+ Caddy(自動HTTPS、Let's Encrypt)の構成。
+- 公開URL: `https://217-142-249-10.nip.io`(nip.ioの無料ワイルドカードDNS。独自ドメイン未取得のため)。
+- SSHは `~/.ssh/oracle_cycling_tracking`(開発機のみに存在、Git管理対象外)で接続。VM上の`~/app/server/.env`(本番用`AUTH_SECRET`・`DATABASE_URL`)もVM上にのみ存在しGit管理対象外。
+- 詳細な構築手順・検証結果は `progress/progress.md` の2026-08-07セクション参照。
 
 ## ネイティブモバイルアプリ (src/mobile)
 - 2026-08-02にスキャフォールド: Expo(SDK 57、プレーンJavaScript、TypeScriptなし、ルーターライブラリなし)の参加者アプリを `src/mobile` に作成した。`src/server/public/participant.js` の挙動(画面構成、タイミング定数、日本語エラー文言)を1対1で移植した上で、Web版にはできなかったバックグラウンド位置情報送信を追加している。
 - バックグラウンド位置情報は `expo-location` + `expo-task-manager`(`src/mobile/src/location/backgroundLocationTask.js`、モジュールスコープで登録する `TaskManager.defineTask`)を使い、フォアグラウンド・バックグラウンド問わず位置情報送信の唯一の手段としている。バックグラウンド権限が拒否された場合はフォアグラウンドのみの `Location.watchPositionAsync` にフォールバックする。
 - 認証トークン/participantIdは `expo-secure-store` に保存している(AsyncStorageではない。資格情報のため)。
 - **実機テストには `development` ではなく `preview` のEASビルドプロファイルを使うこと。** `development`(Metro接続が必要)は、アプリを長時間バックグラウンドに置いた際にバックグラウンドタスクの実行が不安定になることを確認済み。`preview` はビルド時にJSバンドルを埋め込むため、実行時のMetro依存が無い。
-- EASプロジェクト: `@endy_jun/mobile`。現時点での最新の実機確認済みビルド: `25b8e835-d668-4e95-bafc-11216f18c6ff`(セーフエリア対応・ライブ画面コンパクト化・地図の明るさ修正まで含む、2026-08-07)。コード・設定変更後は `src/mobile` から `EAS_SKIP_AUTO_FINGERPRINT=1 npx eas-cli build --profile preview --platform android --non-interactive` で再ビルドする(`EAS_SKIP_AUTO_FINGERPRINT=1` は、このプロジェクトのWindows環境でフィンガープリント計算が汎用エラーで失敗するための回避策)。
-- 2026-08-07に「ルート地図を表示」画面をサーバー配布方式に変更(下記「ルート配布」セクション参照)。**この変更はまだEASビルドに反映されていない**(コード変更・`expo export`でのバンドル検証のみ実施)。次回モバイル関連のビルドを行う際に含まれる。
+- EASプロジェクト: `@endy_jun/mobile`。**2026-08-07にEAS無料枠のAndroidビルド回数を使い切った(月次リセットは9月1日)ため、以降はWSL2(Ubuntu)上でのローカルビルドに切り替えている**。構築手順・ビルドコマンドは `progress/progress.md` の「モバイルのローカルビルド環境」セクション参照。EASクラウドビルドの無料枠が復活すれば、従来通り `EAS_SKIP_AUTO_FINGERPRINT=1 npx eas-cli build --profile preview --platform android --non-interactive` でも再ビルド可能。
+- 現時点での最新の実機確認済みビルド: `mobile-preview-oracle-20260807.apk`(ローカルビルド、`cycling-tracking-app/build/`配下・Git管理対象外)。ルート配布のサーバー化・API接続先のOracle Cloud公開URL(`https://217-142-249-10.nip.io`)反映まで含む。
 - 2026-08-02〜03に実機のAndroid端末で一通り検証済み: 認証フロー、手動送信、バックグラウンド位置情報送信(画面ロック中・他アプリ使用中も10分以上にわたり15〜20秒間隔で継続受信することを、生の `participant_locations` DBレコードと突き合わせて確認)、緊急ボタン、運営本部への電話ボタン、ログアウト、WebSocket再接続/オフラインバナー、セッション切れ(401)処理。見つかって修正したネイティブビルド特有の問題(`RECEIVE_BOOT_COMPLETED` 権限不足によるクラッシュ、EASクラウドビルドがローカルの `.env` を読み込まない問題、`expo-build-properties` 経由でのAndroidの平文HTTP通信ブロック対応、スマホがPCに全く到達できなかったWindowsファイアウォール/ネットワークプロファイルの問題)、および未解決のまま残っている不具合(表示固まり、セッション切れ後の再ログインで自動送信が再開しないケース)の詳細一覧は `progress/progress.md` を参照。
 
 ## 管理画面 (src/server/public/admin.html)

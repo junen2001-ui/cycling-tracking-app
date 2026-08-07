@@ -45,6 +45,88 @@
 
 iOSはまだ未対応です(実機インストールには有料のApple Developerアカウントが必要)が、同じ `expo-location` の設定で対応可能です。
 
+**注意(2026-08-07〜)**: バックエンドはOracle Cloud無料枠に公開デプロイ済み(`https://217-142-249-10.nip.io`)。`src/mobile/eas.json` の `build.preview.env.EXPO_PUBLIC_API_BASE_URL` は現在この公開URLを指しているため、実機テストのために開発機と同じWi-Fiに繋ぐ必要はない。開発機のLAN IPを指す設定に戻すのは、公開バックエンドを使わずローカルのみでテストしたい場合だけでよい。
+
+## モバイルアプリをローカル(WSL2)でビルドする方法(EASクラウドビルドの無料枠を使い切った場合)
+
+EASの無料プランはAndroidビルドの実行回数に月次上限があり(2026-08-07に使い切った、リセットは毎月1日)、上限に達すると `eas-cli build --local` を使ってWSL2上でローカルビルドする必要がある。以下はWindows + WSL2での構築手順(別PCでも同じ手順で再現可能)。
+
+### 前提: WSL2 + Ubuntuが入っていること
+```powershell
+wsl --install -d Ubuntu
+```
+既にWSL2が入っている場合は `wsl -d Ubuntu` でUbuntuのターミナルを開く(Windows Terminalなら「Ubuntu」プロファイルを選ぶのが簡単)。**以降のコマンドはすべて、そのWSL Ubuntuのターミナル内で実行する**(PowerShell/Git Bashから `wsl -d Ubuntu -- ...` 経由で1コマンドずつ実行しようとすると、変数展開やパス変換が壊れることがあるため非推奨)。
+
+### 1. JDK・Node.js・Android SDKをインストール(WSL Ubuntuのターミナルで)
+```bash
+sudo apt-get update
+sudo apt-get install -y openjdk-17-jdk-headless unzip curl git rsync
+
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+mkdir -p ~/Android/Sdk/cmdline-tools
+cd /tmp
+curl -fsSL -o cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+unzip -q cmdline-tools.zip
+mv cmdline-tools ~/Android/Sdk/cmdline-tools/latest
+
+cat >> ~/.bashrc <<'EOF'
+
+export ANDROID_HOME=$HOME/Android/Sdk
+export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+EOF
+source ~/.bashrc
+
+yes | sdkmanager --licenses
+sdkmanager "platform-tools" "build-tools;36.0.0" "platforms;android-36"
+```
+
+### 2. プロジェクトをWSLのネイティブファイルシステムにコピー
+`/mnt/c/...`(OneDrive配下)上で直接 `npm install`・ビルドすると非常に遅いため、WSL内(`~/build/mobile`)にコピーしてから作業する。PC名やユーザー名が違う場合は `SRC` のパスを読み替えること。
+```bash
+mkdir -p ~/build
+rm -rf ~/build/mobile
+rsync -a --exclude 'node_modules' --exclude '.expo' --exclude 'android' --exclude 'ios' \
+  "/mnt/c/Users/$(cmd.exe /c echo %USERNAME% 2>/dev/null | tr -d '\r')/OneDrive/AI/Claude/cycling-tracking-app/src/mobile/" \
+  ~/build/mobile/
+cd ~/build/mobile
+npm install
+```
+(上記の `SRC` 自動検出がうまくいかない場合は、`~/build/mobile` へのコピー元パスを手動で指定する: 例 `/mnt/c/Users/<ユーザー名>/OneDrive/AI/Claude/cycling-tracking-app/src/mobile/`)
+
+### 3. Expoへのログイン
+```bash
+npx eas-cli login
+```
+Windows側で既にログイン済みなら、Windows側の `%USERPROFILE%\.expo\state.json` を `~/.expo/state.json` にコピーしてくる方法でも再ログインを省略できる(Expoアカウント: `endy_jun`)。
+
+### 4. ローカルビルド実行
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+export ANDROID_HOME=$HOME/Android/Sdk
+export EAS_SKIP_AUTO_FINGERPRINT=1
+export EAS_NO_VCS=1   # コピー先に .git が無いため必須
+
+npx eas-cli build --profile preview --platform android --local --non-interactive \
+  --output ~/build/mobile-preview.apk
+```
+初回はGradleの依存関係ダウンロードを含め10〜15分程度、2回目以降(キャッシュが効く)は8分前後。ビルド後、生成されたAPKに正しいAPI URLが埋め込まれているか確認するには:
+```bash
+mkdir -p /tmp/apk_check && cd /tmp/apk_check
+unzip -q ~/build/mobile-preview.apk -d extracted
+strings extracted/assets/index.android.bundle | grep -o "217-142-249-10\.nip\.io"
+```
+
+### 5. Windows側にAPKを取り出す
+```bash
+cp ~/build/mobile-preview.apk "/mnt/c/Users/$(cmd.exe /c echo %USERNAME% 2>/dev/null | tr -d '\r')/OneDrive/AI/Claude/cycling-tracking-app/build/mobile-preview-$(date +%Y%m%d).apk"
+```
+`cycling-tracking-app/build/` はOneDrive同期対象かつ `.gitignore` 済みなので、そのままスマホのOneDriveアプリからインストールできる(gitには含まれない)。
+
+### コード変更後の再ビルド
+`src/mobile` 側のファイルを変更したら、手順2(コピー、`node_modules` が既にあれば `npm install` は省略可)〜手順4を繰り返す。`eas.json` だけを変更した場合も同様にコピーからやり直す必要がある(WSL側は独立したコピーのため)。
+
 ## 別のPCで開発を再開する手順
 
 このプロジェクトは `OneDrive` 配下のフォルダで開発しており、OneDriveがファイル全体(コード・`node_modules`・`.env` を含む)を自動的に他のPCへ同期する。ただし、以下の2点はOneDriveの同期対象外・対象外に近いため、新しいPCでは別途対応が必要:
@@ -156,4 +238,40 @@ New-NetFirewallRule -DisplayName "Cycling Tracking Dev Server (port 3000)" -Dire
 # 新しいPCのLAN IPを確認
 ipconfig | Select-String "IPv4"
 ```
-確認したIPを `src/mobile/.env` と `src/mobile/eas.json`(`build.preview.env.EXPO_PUBLIC_API_BASE_URL`)に設定し、IPが変わっていれば `preview` プロファイルのAPKを再ビルドする。
+確認したIPを `src/mobile/.env` と `src/mobile/eas.json`(`build.preview.env.EXPO_PUBLIC_API_BASE_URL`)に設定し、IPが変わっていれば `preview` プロファイルのAPKを再ビルドする。**注意**: これはローカルLANのみでテストしたい場合の設定で、Oracle Cloud上の公開バックエンド(`https://217-142-249-10.nip.io`)を使う通常のテストでは不要。
+
+### 10. Oracle Cloud本番バックエンドへの再デプロイ(サーバー側のコードを更新した場合)
+
+本番バックエンド(`https://217-142-249-10.nip.io`)はOracle Cloud無料枠のVM(パブリックIP `217.142.249.10`、Ubuntu 24.04)上で、Docker(PostgreSQL/PostGIS)+ Node.js(systemdサービス `cycling-tracking`)+ Caddy(自動HTTPS)という構成で常時稼働している。VM自体は既に作成済みなので、別PCから行うのは「SSH接続の準備」と「コード更新のデプロイ」のみ。
+
+**SSH接続の準備**(このPCで初めて接続する場合):
+1. VM作成時に登録した秘密鍵(`~/.ssh/oracle_cycling_tracking`)を、元のPCから安全な方法(USBメモリ・パスワードマネージャー等。OneDriveやgitには含まれない)でコピーしてくる。
+2. または、OCIコンソール(https://cloud.oracle.com )の対象インスタンス → Console Connection等で新しい公開鍵を追加登録し、このPCで新しい鍵ペアを生成して使う。
+
+**コード更新のデプロイ手順**(WSL不要、Git BashまたはPowerShellから実行可能):
+```bash
+# 1. サーバーコードをVMに転送(node_modules/.envは除外)
+cd "cycling-tracking-app/src"
+tar czf - --exclude='node_modules' --exclude='.env' server | \
+  ssh -i ~/.ssh/oracle_cycling_tracking ubuntu@217.142.249.10 \
+  "rm -rf ~/app/server_new && mkdir -p ~/app/server_new && tar xzf - -C ~/app/server_new"
+
+# 2. .envを引き継ぎつつ入れ替え、依存関係を更新してサービス再起動
+ssh -i ~/.ssh/oracle_cycling_tracking ubuntu@217.142.249.10 "
+  cp ~/app/server/.env ~/app/server_new/server/.env &&
+  rm -rf ~/app/server_old && mv ~/app/server ~/app/server_old && mv ~/app/server_new/server ~/app/server &&
+  cd ~/app/server && npm install --omit=dev &&
+  sudo systemctl restart cycling-tracking &&
+  sleep 2 && sudo systemctl status cycling-tracking --no-pager
+"
+
+# 3. 動作確認
+curl -s -o /dev/null -w "%{http_code}\n" https://217-142-249-10.nip.io/api/participants
+```
+DBスキーマを変更した場合は、上記に加えて `ssh ... "cd ~/app/server && npm run init-db"` も実行する(`init-db.js` は既存テーブルを壊さない前提のスキーマなので、通常は安全に再実行できる)。
+
+VMの状態確認・トラブルシュート用コマンド:
+```bash
+ssh -i ~/.ssh/oracle_cycling_tracking ubuntu@217.142.249.10 "sudo systemctl status cycling-tracking caddy docker --no-pager"
+ssh -i ~/.ssh/oracle_cycling_tracking ubuntu@217.142.249.10 "sudo journalctl -u cycling-tracking -n 50 --no-pager"
+```

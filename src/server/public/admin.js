@@ -475,6 +475,8 @@ function setupWebSocket() {
         renderRestAreaLayer(message.payload);
       } else if (message.type === 'rest-area-deleted' && message.payload) {
         removeRestAreaLayer(message.payload.id);
+      } else if (message.type === 'route-updated' && message.payload && Array.isArray(message.payload.points)) {
+        renderRoute(message.payload.points.map((p) => [p.latitude, p.longitude]));
       }
     } catch (error) {
       console.error('Invalid WebSocket message', error, event.data);
@@ -719,6 +721,38 @@ function parseGpxRoute(xmlText) {
   return extractPoints('rtept');
 }
 
+function renderRoute(points) {
+  if (routeLayer) {
+    map.removeLayer(routeLayer);
+  }
+  routeLayer = L.polyline(points, { color: '#1a73e8', weight: 4 }).addTo(map);
+}
+
+async function fetchRoute() {
+  try {
+    const response = await fetch('/api/route');
+    const data = await response.json();
+    if (data.success && data.route && Array.isArray(data.route.points) && data.route.points.length > 0) {
+      renderRoute(data.route.points.map((p) => [p.latitude, p.longitude]));
+    }
+  } catch (error) {
+    console.error('Failed to fetch route', error);
+  }
+}
+
+async function saveRouteToServer(points) {
+  try {
+    await fetch('/api/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points: points.map(([latitude, longitude]) => ({ latitude, longitude })) }),
+    });
+  } catch (error) {
+    console.error('Failed to save route to server', error);
+    alert('ルートをサーバーに保存できませんでした(参加者アプリには反映されません)。');
+  }
+}
+
 function handleGpxFile(file) {
   const reader = new FileReader();
   reader.onload = () => {
@@ -728,13 +762,12 @@ function handleGpxFile(file) {
       return;
     }
 
-    if (routeLayer) {
-      map.removeLayer(routeLayer);
-    }
-    routeLayer = L.polyline(points, { color: '#1a73e8', weight: 4 }).addTo(map);
-
+    renderRoute(points);
     // スタート地点を中心に表示する(ルート全体へのフィットはしない)
     map.setView(points[0], 15, { animate: true });
+
+    // 参加者アプリ全員が自動取得できるよう、サーバーにも保存する
+    saveRouteToServer(points);
   };
   reader.onerror = () => {
     alert('GPXファイルの読み込みに失敗しました。');
@@ -921,6 +954,7 @@ async function init() {
 
   fetchIncidents();
   fetchRestAreas();
+  fetchRoute();
   setupWebSocket();
 }
 

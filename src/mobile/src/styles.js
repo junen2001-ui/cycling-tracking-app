@@ -17,6 +17,7 @@ export const colors = {
   bannerBg: '#fff4e5',
   bannerText: '#8a5300',
   border: '#ccc',
+  statusBarBg: '#1c2733',
 };
 
 export const styles = StyleSheet.create({
@@ -25,8 +26,8 @@ export const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   content: {
-    padding: 20,
-    paddingBottom: 40,
+    padding: 16,
+    paddingBottom: 20,
   },
   splashWrap: {
     flex: 1,
@@ -49,8 +50,8 @@ export const styles = StyleSheet.create({
   card: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
+    padding: 14,
+    marginBottom: 10,
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 8,
@@ -73,9 +74,9 @@ export const styles = StyleSheet.create({
   },
   button: {
     borderRadius: 999,
-    paddingVertical: 14,
+    paddingVertical: 12,
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: 10,
   },
   buttonDisabled: {
     opacity: 0.5,
@@ -101,8 +102,8 @@ export const styles = StyleSheet.create({
   },
   linkButton: {
     alignItems: 'center',
-    padding: 8,
-    marginTop: 8,
+    padding: 6,
+    marginTop: 6,
   },
   linkButtonText: {
     color: colors.primary,
@@ -153,7 +154,7 @@ export const styles = StyleSheet.create({
   banner: {
     padding: 12,
     borderRadius: 8,
-    marginBottom: 16,
+    marginBottom: 10,
     backgroundColor: colors.bannerBg,
   },
   bannerText: {

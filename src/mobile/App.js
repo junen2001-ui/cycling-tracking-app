@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { AppState, Linking, SafeAreaView } from 'react-native';
+import { AppState, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 
 // TaskManager.defineTask をアプリ起動時(モジュール読み込み時)に必ず登録するため、
@@ -27,13 +28,21 @@ import {
   setAuthExpiredHandler,
 } from './src/api/client';
 import { connectWebSocket, closeWebSocket } from './src/websocket/socket';
-import { styles } from './src/styles';
+import { styles, colors } from './src/styles';
 
 import SplashScreen from './src/screens/SplashScreen';
 import AuthPhoneScreen from './src/screens/AuthPhoneScreen';
 import AuthCodeScreen from './src/screens/AuthCodeScreen';
 import LiveScreen from './src/screens/LiveScreen';
 import RouteMapScreen from './src/screens/RouteMapScreen';
+
+// ステータスバー領域の背景色の帯(react-native-safe-area-contextのSafeAreaViewはtopエッジを
+// パディングとして消費するだけで色は付けられないため、別要素で描画する)。ルート地図画面は
+// 屋外の日中利用で見やすいよう明るい背景、それ以外は暗い背景にする
+function TopStatusBarBackground({ light }) {
+  const insets = useSafeAreaInsets();
+  return <View style={{ height: insets.top, backgroundColor: light ? '#ffffff' : colors.statusBarBg }} />;
+}
 
 export default function App() {
   const [screen, setScreen] = useState('splash');
@@ -319,28 +328,6 @@ export default function App() {
     }
   }
 
-  async function handleOpenGoogleMaps() {
-    setLocationError('');
-    try {
-      const granted = await requestForegroundPermission();
-      if (!granted) {
-        setLocationError('位置情報の利用が許可されていません。端末の設定を確認してください。');
-        return;
-      }
-      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const { latitude, longitude } = position.coords;
-      const geoUrl = `geo:${latitude},${longitude}?q=${latitude},${longitude}`;
-      const canOpenGeo = await Linking.canOpenURL(geoUrl);
-      if (canOpenGeo) {
-        await Linking.openURL(geoUrl);
-      } else {
-        await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`);
-      }
-    } catch (error) {
-      setLocationError(geolocationErrorMessage(error));
-    }
-  }
-
   async function handleSendIncident() {
     setIncidentError('');
     const result = await postIncident({ incidentType: 'emergency', message: 'Emergency button pressed' }, tokenRef.current);
@@ -370,40 +357,44 @@ export default function App() {
     setScreen('auth-phone');
   }
 
+  const onRouteMapScreen = screen === 'route-map';
+
   return (
-    <SafeAreaView style={styles.screen}>
-      <StatusBar style="auto" />
-      {screen === 'splash' && <SplashScreen message={splashMessage} />}
-      {screen === 'auth-phone' && <AuthPhoneScreen onSendCode={handleSendCode} busy={sendCodeBusy} />}
-      {screen === 'auth-code' && (
-        <AuthCodeScreen
-          phoneNumber={pendingPhoneNumber}
-          devCodeHint={devCodeHint}
-          onVerifyCode={handleVerifyCode}
-          onBack={() => setScreen('auth-phone')}
-          busy={verifyCodeBusy}
-        />
-      )}
-      {screen === 'live' && (
-        <LiveScreen
-          participantId={participantId}
-          offline={offline}
-          status={status}
-          autoSendEnabled={autoSendEnabled}
-          onToggleAutoSend={handleToggleAutoSend}
-          backgroundLocationNote={backgroundLocationNote}
-          locationStatusText={locationStatusText}
-          locationError={locationError}
-          sendingLocation={sendingLocation}
-          onSendLocationNow={handleSendLocationNow}
-          onSendIncident={handleSendIncident}
-          incidentError={incidentError}
-          onLogout={handleLogout}
-          onOpenGoogleMaps={handleOpenGoogleMaps}
-          onShowRouteMap={() => setScreen('route-map')}
-        />
-      )}
-      {screen === 'route-map' && <RouteMapScreen onBack={() => setScreen('live')} />}
-    </SafeAreaView>
+    <SafeAreaProvider>
+      <TopStatusBarBackground light={onRouteMapScreen} />
+      <SafeAreaView style={styles.screen} edges={['bottom', 'left', 'right']}>
+        <StatusBar style={onRouteMapScreen ? 'dark' : 'light'} />
+        {screen === 'splash' && <SplashScreen message={splashMessage} />}
+        {screen === 'auth-phone' && <AuthPhoneScreen onSendCode={handleSendCode} busy={sendCodeBusy} />}
+        {screen === 'auth-code' && (
+          <AuthCodeScreen
+            phoneNumber={pendingPhoneNumber}
+            devCodeHint={devCodeHint}
+            onVerifyCode={handleVerifyCode}
+            onBack={() => setScreen('auth-phone')}
+            busy={verifyCodeBusy}
+          />
+        )}
+        {screen === 'live' && (
+          <LiveScreen
+            participantId={participantId}
+            offline={offline}
+            status={status}
+            autoSendEnabled={autoSendEnabled}
+            onToggleAutoSend={handleToggleAutoSend}
+            backgroundLocationNote={backgroundLocationNote}
+            locationStatusText={locationStatusText}
+            locationError={locationError}
+            sendingLocation={sendingLocation}
+            onSendLocationNow={handleSendLocationNow}
+            onSendIncident={handleSendIncident}
+            incidentError={incidentError}
+            onLogout={handleLogout}
+            onShowRouteMap={() => setScreen('route-map')}
+          />
+        )}
+        {screen === 'route-map' && <RouteMapScreen onBack={() => setScreen('live')} />}
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }

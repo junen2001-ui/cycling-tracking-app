@@ -22,6 +22,7 @@ const inMemoryParticipants = new Map();
 const inMemoryLocations = new Map();
 const inMemoryIncidents = new Map();
 const inMemoryRestAreas = new Map();
+let inMemoryRoute = null;
 const participantStatusCache = new Map();
 const participantStationarySince = new Map();
 const STALLED_THRESHOLD_MS = 10 * 60 * 1000; // 完全に更新が止まった場合の閾値
@@ -940,6 +941,73 @@ app.get('/api/rest-areas', async (_req, res) => {
   } catch (error) {
     console.error('Failed to load rest areas from DB, returning in-memory fallback:', error);
     return res.json({ success: true, restAreas: listRestAreasFromMemory(), note: 'returned in-memory fallback due to DB error' });
+  }
+});
+
+// 運営が事前にアップロードした1本のルート(GPX由来の座標列)を全参加者アプリ・管理画面で共有する。
+// イベントごとにルートは1本の想定のため、アップロードのたびに既存のルートを置き換える。
+app.post('/api/route', async (req, res) => {
+  const { points } = req.body;
+
+  if (!Array.isArray(points) || points.length === 0 || !points.every((p) => typeof p?.latitude === 'number' && typeof p?.longitude === 'number')) {
+    return res.status(400).json({ success: false, message: 'points must be a non-empty array of { latitude, longitude }' });
+  }
+
+  try {
+    if (!pool) {
+      throw new Error('DATABASE_URL is not configured');
+    }
+
+    await pool.query('DELETE FROM routes');
+    const result = await pool.query(
+      `INSERT INTO routes (points) VALUES ($1) RETURNING id, created_at, updated_at`,
+      [JSON.stringify(points)]
+    );
+
+    const route = {
+      id: result.rows[0].id,
+      points,
+      created_at: result.rows[0].created_at instanceof Date
+        ? result.rows[0].created_at.toISOString()
+        : new Date(result.rows[0].created_at).toISOString(),
+      updated_at: result.rows[0].updated_at instanceof Date
+        ? result.rows[0].updated_at.toISOString()
+        : new Date(result.rows[0].updated_at).toISOString(),
+    };
+
+    broadcastMessage({ type: 'route-updated', payload: route });
+    return res.json({ success: true, route });
+  } catch (error) {
+    console.error('Failed to save route to DB, falling back to memory:', error);
+    const now = getCurrentIsoTimestamp();
+    inMemoryRoute = { id: randomUUID(), points, created_at: now, updated_at: now };
+    broadcastMessage({ type: 'route-updated', payload: inMemoryRoute });
+    return res.json({ success: true, route: inMemoryRoute, note: 'saved to in-memory fallback' });
+  }
+});
+
+app.get('/api/route', async (_req, res) => {
+  if (!pool) {
+    return res.json({ success: true, route: inMemoryRoute });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id, points, created_at, updated_at FROM routes ORDER BY updated_at DESC LIMIT 1`
+    );
+    if (result.rows.length === 0) {
+      return res.json({ success: true, route: null });
+    }
+    const row = result.rows[0];
+    const route = {
+      ...row,
+      created_at: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString(),
+      updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : new Date(row.updated_at).toISOString(),
+    };
+    return res.json({ success: true, route });
+  } catch (error) {
+    console.error('Failed to load route from DB, returning in-memory fallback:', error);
+    return res.json({ success: true, route: inMemoryRoute, note: 'returned in-memory fallback due to DB error' });
   }
 });
 

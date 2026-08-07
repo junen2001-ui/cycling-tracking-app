@@ -1,94 +1,97 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { PROVIDER_GOOGLE, Polyline } from 'react-native-maps';
-import * as DocumentPicker from 'expo-document-picker';
-import { File } from 'expo-file-system';
-import { parseGpxRoute } from '../utils/gpx';
+import * as Location from 'expo-location';
+import { getRoute } from '../api/client';
 import { loadRouteCoordinates, saveRouteCoordinates } from '../route/routeStorage';
-import { styles } from '../styles';
+import { requestForegroundPermission } from '../location/permissions';
+import { styles, colors } from '../styles';
+
+const CURRENT_LOCATION_ZOOM_DELTA = 0.01;
 
 export default function RouteMapScreen({ onBack }) {
   const [routeCoords, setRouteCoords] = useState([]);
+  const [initialRegion, setInitialRegion] = useState(null);
   const [loadError, setLoadError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const mapRef = useRef(null);
+
+  async function refreshRouteFromServer() {
+    setRefreshing(true);
+    setLoadError('');
+    try {
+      const result = await getRoute();
+      if (result.success && result.route && Array.isArray(result.route.points) && result.route.points.length > 0) {
+        setRouteCoords(result.route.points);
+        await saveRouteCoordinates(result.route.points);
+      } else if (!result.success) {
+        setLoadError('ルートをサーバーから取得できませんでした(前回表示したルートを表示しています)。');
+      }
+    } catch (error) {
+      setLoadError('ルートをサーバーから取得できませんでした(前回表示したルートを表示しています)。');
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   useEffect(() => {
     (async () => {
-      const saved = await loadRouteCoordinates();
-      if (saved && saved.length > 0) {
-        setRouteCoords(saved);
+      // まず端末に保存済みのルートを即座に表示し、その後サーバーの最新版で更新する
+      const cached = await loadRouteCoordinates();
+      if (cached && cached.length > 0) {
+        setRouteCoords(cached);
+      }
+      await refreshRouteFromServer();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const granted = await requestForegroundPermission();
+        if (!granted) return;
+        const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        setInitialRegion({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          latitudeDelta: CURRENT_LOCATION_ZOOM_DELTA,
+          longitudeDelta: CURRENT_LOCATION_ZOOM_DELTA,
+        });
+      } catch (error) {
+        // 現在地取得に失敗した場合は地図をデフォルト表示のままにする
       }
     })();
   }, []);
 
-  useEffect(() => {
-    if (routeCoords.length > 0 && mapRef.current) {
-      mapRef.current.fitToCoordinates(routeCoords, {
-        edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
-        animated: true,
-      });
-    }
-  }, [routeCoords]);
-
-  async function handleLoadGpx() {
-    setLoadError('');
-    setLoading(true);
-    try {
-      const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
-      if (result.canceled) {
-        return;
-      }
-
-      const asset = result.assets[0];
-      if (!asset.name || !asset.name.toLowerCase().endsWith('.gpx')) {
-        setLoadError('GPXファイル(.gpx)を選択してください。');
-        return;
-      }
-
-      const file = new File(asset.uri);
-      const text = await file.text();
-      const points = parseGpxRoute(text);
-      if (points.length === 0) {
-        setLoadError('GPXファイルからルート情報を読み取れませんでした。');
-        return;
-      }
-
-      setRouteCoords(points);
-      await saveRouteCoordinates(points);
-    } catch (error) {
-      setLoadError('GPXファイルの読み込みに失敗しました。');
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
     <View style={localStyles.container}>
-      <MapView
-        ref={mapRef}
-        provider={PROVIDER_GOOGLE}
-        style={localStyles.map}
-        showsUserLocation
-        initialRegion={{
-          latitude: 35.681236,
-          longitude: 139.767125,
-          latitudeDelta: 0.05,
-          longitudeDelta: 0.05,
-        }}
-      >
-        {routeCoords.length > 0 ? (
-          <Polyline coordinates={routeCoords} strokeColor="#1a73e8" strokeWidth={4} />
-        ) : null}
-      </MapView>
+      {initialRegion ? (
+        <MapView
+          ref={mapRef}
+          provider={PROVIDER_GOOGLE}
+          style={localStyles.map}
+          showsUserLocation
+          initialRegion={initialRegion}
+          userInterfaceStyle="light"
+        >
+          {routeCoords.length > 0 ? (
+            <Polyline coordinates={routeCoords} strokeColor="#1a73e8" strokeWidth={4} />
+          ) : null}
+        </MapView>
+      ) : (
+        <View style={[localStyles.map, localStyles.mapLoading]}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      )}
 
       <View style={localStyles.controls}>
         <Pressable
-          style={[styles.button, styles.primaryButton, loading && styles.buttonDisabled]}
-          onPress={handleLoadGpx}
-          disabled={loading}
+          style={[styles.button, styles.secondaryButton, { marginTop: 0 }, refreshing && styles.buttonDisabled]}
+          onPress={refreshRouteFromServer}
+          disabled={refreshing}
         >
-          <Text style={styles.primaryButtonText}>{loading ? '読み込み中...' : 'GPXファイルを読み込む'}</Text>
+          <Text style={styles.secondaryButtonText}>{refreshing ? '更新中...' : '最新のルートを再取得'}</Text>
         </Pressable>
         {loadError ? <Text style={styles.errorText}>{loadError}</Text> : null}
         <Pressable style={styles.linkButton} onPress={onBack}>
@@ -105,6 +108,11 @@ const localStyles = StyleSheet.create({
   },
   map: {
     flex: 1,
+  },
+  mapLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#eee',
   },
   controls: {
     position: 'absolute',

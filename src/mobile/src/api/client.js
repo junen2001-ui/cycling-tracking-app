@@ -60,3 +60,12 @@ export async function getParticipants() {
     return { success: false, networkError: true, message: networkError.message };
   }
 }
+
+export async function getRoute() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/route`);
+    return await response.json();
+  } catch (networkError) {
+    return { success: false, networkError: true, message: networkError.message };
+  }
+}

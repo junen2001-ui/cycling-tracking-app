@@ -44,8 +44,8 @@ export function verifyCode(phoneNumber, code) {
   return postJson('/api/auth/verify-code', { phoneNumber, code });
 }
 
-export function postLocation({ latitude, longitude, accuracy, timestamp }, token) {
-  return postJson('/api/locations', { latitude, longitude, accuracy, timestamp }, token);
+export function postLocation({ latitude, longitude, accuracy, timestamp, stalled }, token) {
+  return postJson('/api/locations', { latitude, longitude, accuracy, timestamp, stalled }, token);
 }
 
 export function postIncident({ incidentType, message }, token) {

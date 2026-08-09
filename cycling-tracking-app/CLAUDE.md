@@ -11,7 +11,7 @@
 - `/api/locations` による位置情報アップロードAPIが動作している
 - `/api/participants` による参加者取得APIが動作している
 - `ws://127.0.0.1:3000` でWebSocketサーバーを実装し、`location-update` イベントをブロードキャストしている
-- 滞留(stalled)判定は「10分以上無音」または「休憩所以外で5分以上ほぼ同じ場所に留まっている」のいずれかで判定(2026-08-06拡張、`server.js`の`computeStalledStatus()`)。留まり始めた時刻は`participantStationarySince`にメモリ上で保持(DB永続化はしていない、サーバー再起動でリセットされる)。
+- 「滞留」と「ロスト」は別概念として管理している(2026-08-09、`server.js`の`computeParticipantStatus()`)。滞留はアプリ側が直近5分の移動距離(250m未満)から判定して送ってくる(`participantClientStalled`にメモリ保持)。ロストはサーバー側で「10分間無音」のみから判定する。休憩所内にいる場合は滞留とみなさない。旧バージョンのアプリ向けに、サーバー側の静止時間ヒューリスティック(`participantStationarySince`)へのフォールバックも維持している(いずれもDB永続化なし、サーバー再起動でリセット)。詳細は `progress/progress.md` の2026-08-09セクション参照。
 
 ## 完了したマイルストーン
 - サーバー基盤・環境構築
@@ -21,6 +21,7 @@
 - 位置情報更新のリアルタイムWebSocketブロードキャスト
 
 ## 次に取り組むこと
+- **未検証(次回最優先)**: 2026-08-09に実装・ローカルビルドした位置情報送信・滞留/ロースト判定の全面見直し(`mobile-preview-stalled-lost-20260809.apk`)がまだ実機検証されていない。確認observation項目は `progress/progress.md` の2026-08-09セクション「実機での確認事項」参照。
 - `src/mobile`(参加者アプリ)の3件の不具合修正・地図機能とも実機検証まで完了(2026-08-06)。残るはiOSビルド/検証(有料のApple Developerアカウントが必要)のみ。
 - 管理画面(`admin.html`/`admin.js`)の拡張(日本語化・GPXルート表示・現在地初期表示・アラート/停滞一覧の消去)も実装・Playwright検証まで完了(2026-08-06)。詳細は `progress/progress.md` セクション11参照。
 - バックエンドの公開デプロイ(Oracle Cloud無料枠)は2026-08-07に完了。`https://217-142-249-10.nip.io` で稼働中。詳細は `progress/progress.md` の同日セクション参照。
@@ -38,7 +39,12 @@
 - 認証トークン/participantIdは `expo-secure-store` に保存している(AsyncStorageではない。資格情報のため)。
 - **実機テストには `development` ではなく `preview` のEASビルドプロファイルを使うこと。** `development`(Metro接続が必要)は、アプリを長時間バックグラウンドに置いた際にバックグラウンドタスクの実行が不安定になることを確認済み。`preview` はビルド時にJSバンドルを埋め込むため、実行時のMetro依存が無い。
 - EASプロジェクト: `@endy_jun/mobile`。**2026-08-07にEAS無料枠のAndroidビルド回数を使い切った(月次リセットは9月1日)ため、以降はWSL2(Ubuntu)上でのローカルビルドに切り替えている**。構築手順・ビルドコマンドは `progress/progress.md` の「モバイルのローカルビルド環境」セクション参照。EASクラウドビルドの無料枠が復活すれば、従来通り `EAS_SKIP_AUTO_FINGERPRINT=1 npx eas-cli build --profile preview --platform android --non-interactive` でも再ビルド可能。
-- 現時点での最新の実機確認済みビルド: `mobile-preview-oracle-20260807.apk`(ローカルビルド、`cycling-tracking-app/build/`配下・Git管理対象外)。ルート配布のサーバー化・API接続先のOracle Cloud公開URL(`https://217-142-249-10.nip.io`)反映まで含む。
+- 現時点での最新ビルド: `mobile-preview-stalled-lost-20260809.apk`(ローカルビルド、`cycling-tracking-app/build/`配下・Git管理対象外、**未検証**)。位置情報送信・滞留/ロースト判定の全面見直しを含む(詳細は下記および `progress/progress.md` の2026-08-09セクション参照)。実機で最後に確認済みのビルドは `mobile-preview-oracle-20260807.apk`(ルート配布のサーバー化・Oracle Cloud公開URL反映)。
+- **位置情報の送信方針(2026-08-09見直し)**: `accuracy`は`High`固定(`Balanced`はAndroidネイティブ側で`PRIORITY_BALANCED_POWER_ACCURACY`となりWi-Fi/基地局ベースの間延びした測位になる不具合が実機で確認されたため、`Balanced`は不採用)。送信間隔は`LOCATION_SEND_INTERVAL_MS`(`src/mobile/src/config.js`、現在60秒)。「移動25m未満は送信しない」はOSの`distanceInterval`に頼らず`src/mobile/src/route/trailStorage.js`の`evaluateLocationForSending()`で軌跡データから自前に計算する(OS側の直線距離フィルタは移動を検知し損ねることがあった)。
+- **滞留(stalled)判定はアプリ側で実施**: 直近5分の移動距離が250m未満なら滞留とみなす(`STALLED_WINDOW_MS`/`STALLED_DISTANCE_THRESHOLD_M`)。**滞留に入った瞬間・滞留から復帰した瞬間のみ送信し、滞留継続中は送信しない**(電力節約、ユーザー指示)。「ロスト」(通信途絶)はサーバー側で無音時間のみから判定する別概念(`server.js`参照)。
+- 緊急ボタン押下時は`sendFreshLocationNow()`(`App.js`)で高精度な現在地を確実に取得・送信してから通知する(それまで緊急通知に位置情報が一切添付されていなかった不具合を修正)。
+- アプリをタスク一覧からスワイプで終了すると位置情報送信も停止する(`foregroundService.killServiceOnDestroy: true`)。通常のバックグラウンド(画面ロック・他アプリ切替)では継続する。
+- 走行軌跡を`trailStorage.js`でログイン〜ログアウトの全区間分ローカル保存し、`RouteMapScreen.js`でピンクのポリライン+進行方向を示す矢印マーカーとして表示する。
 - 2026-08-02〜03に実機のAndroid端末で一通り検証済み: 認証フロー、手動送信、バックグラウンド位置情報送信(画面ロック中・他アプリ使用中も10分以上にわたり15〜20秒間隔で継続受信することを、生の `participant_locations` DBレコードと突き合わせて確認)、緊急ボタン、運営本部への電話ボタン、ログアウト、WebSocket再接続/オフラインバナー、セッション切れ(401)処理。見つかって修正したネイティブビルド特有の問題(`RECEIVE_BOOT_COMPLETED` 権限不足によるクラッシュ、EASクラウドビルドがローカルの `.env` を読み込まない問題、`expo-build-properties` 経由でのAndroidの平文HTTP通信ブロック対応、スマホがPCに全く到達できなかったWindowsファイアウォール/ネットワークプロファイルの問題)、および未解決のまま残っている不具合(表示固まり、セッション切れ後の再ログインで自動送信が再開しないケース)の詳細一覧は `progress/progress.md` を参照。
 
 ## 管理画面 (src/server/public/admin.html)
@@ -48,6 +54,7 @@
 - 2026-08-07に参加者名・電話番号のExcelインポート機能を追加(「Excelインポート」ボタン→列指定ダイアログ→`POST /api/participants/import-roster`)。電話番号は`normalizePhoneNumber()`で数字のみに正規化した上で認証フロー・インポートの両方に適用しており、表記ゆれによる二重登録を防止している。まだアプリ未認証の参加者はExcel内容で事前登録され、本人が後から認証すると自動的に紐付く。既存の手動編集機能は維持。詳細は `progress/progress.md` セクション12参照。
 - 2026-08-07に休憩所の追加インタフェースを追加(「休憩所を追加」ボタン→地図クリックで中心座標指定→名前・幅・高さ入力ダイアログ→`POST /api/rest-areas`)。登録済みの休憩所は矩形として地図に表示され、クリックすると削除もできる(`DELETE /api/rest-areas/:id`、新規追加)。複数管理画面タブ間はWebSocket(`rest-area-created`/`rest-area-deleted`)で同期。詳細は `progress/progress.md` セクション13参照。
 - 2026-08-07に画面レイアウトを刷新(ユーザー指示): 地図表示領域を最大化するため、画面幅860px超では「地図(左、画面いっぱい)+情報パネル(右、幅300pxサイドバー)」の横並びに変更。860px以下(スマホ)では自動的に元の縦積み(地図の下にパネル)レイアウトに切り替わるレスポンシブ対応(メディアクエリ)。
+- 2026-08-09に「滞留」「ロスト」を別状態として表示するよう変更。マーカー色を3色化(稼働中=赤橙、滞留中=amber、ロスト=グレー)、参加者一覧・停滞パネルの表示も3状態対応(`statusLabel()`/`statusColor()`ヘルパー)。`GET /api/participants`・WebSocketの`stalled`に加えて`lost`フィールドを追加。
 - 2026-08-07に「GPXファイルを読み込む」ボタンの保存先をサーバーに変更(下記「ルート配布」セクション参照)。ブラウザ内でのパース・スタート地点中心表示という見た目の挙動自体は変更なし。
 
 ## ルート配布 (2026-08-07)

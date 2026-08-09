@@ -112,6 +112,10 @@
       color: #b06000;
       font-weight: bold;
     }
+    .roster-status.lost {
+      color: #b00020;
+      font-weight: bold;
+    }
     .roster-empty {
       color: #666;
       font-size: 0.95rem;
@@ -144,6 +148,14 @@
     }
     .stalled-card:hover {
       background: #ffefc7;
+    }
+    .stalled-card.lost {
+      background: #fdecea;
+      border: 1px solid #f5b3ac;
+      color: #7a1a10;
+    }
+    .stalled-card.lost:hover {
+      background: #fbdad5;
     }
     .card-body { flex: 1; min-width: 0; }
     .alert-card b,
@@ -318,10 +330,10 @@
       </div>
       <div class="panel">
         <div class="panel-header">
-          停滞中の参加者 (<span id="stalled-count">0</span>)
+          滞留・ロスト中の参加者 (<span id="stalled-count">0</span>)
         </div>
         <div id="stalled-list" class="stalled-list">
-          <div class="stalled-empty">停滞中の参加者はいません</div>
+          <div class="stalled-empty">滞留・ロスト中の参加者はいません</div>
         </div>
       </div>
       <div class="panel">

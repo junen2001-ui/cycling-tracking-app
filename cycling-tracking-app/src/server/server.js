@@ -25,9 +25,12 @@ const inMemoryRestAreas = new Map();
 let inMemoryRoute = null;
 const participantStatusCache = new Map();
 const participantStationarySince = new Map();
-const STALLED_THRESHOLD_MS = 10 * 60 * 1000; // 完全に更新が止まった場合の閾値
+// アプリ側(2026-08-09〜)が送ってくる滞留フラグ(直近5分の移動距離から判定)。旧バージョンのアプリは
+// このフィールドを送ってこないため、その場合はサーバー側の静止時間ヒューリスティックにフォールバックする。
+const participantClientStalled = new Map();
+const STALLED_THRESHOLD_MS = 10 * 60 * 1000; // 完全に更新が止まった場合(ロスト)の閾値
 const STALLED_DISTANCE_M = 30;
-const STATIONARY_THRESHOLD_MS = 5 * 60 * 1000; // 更新はあるが同じ場所に留まっている場合の閾値
+const STATIONARY_THRESHOLD_MS = 5 * 60 * 1000; // 更新はあるが同じ場所に留まっている場合の閾値(フォールバック用)
 const STALLED_CHECK_INTERVAL_MS = 30 * 1000;
 
 function getLastLocationFromMemory(participantId) {
@@ -114,29 +117,41 @@ function isInsideAnyRestArea(latitude, longitude, restAreas) {
   return restAreas.some((area) => isLocationInsideRestArea(latitude, longitude, area));
 }
 
-// 「10分以上まったく更新が来ない」、または「休憩所以外の場所に5分以上留まり続けている」場合に滞留と判定する
-function computeStalledStatus({ lastTimestamp, stationarySince, insideRestArea }) {
+// 「ロスト」と「滞留」は別概念として扱う(2026-08-09〜):
+//   ロスト: サーバーが10分以上まったく更新を受信できていない状態。電波不良・GPS不調・電池切れなど
+//           原因を問わず「連絡が取れない」ことを示す。参加者アプリ側では判定しようがないため、
+//           サーバー側の無音時間のみで判定する。
+//   滞留:   通信は取れているが、実際に進んでいない状態。アプリ側が直近5分の移動距離から判定して
+//           送ってくる(clientStalled)。休憩所内にいる場合は滞留とみなさない。
+//           旧バージョンのアプリ(clientStalledを送ってこない)向けに、従来の「同じ場所に留まって
+//           いる時間」ヒューリスティックへのフォールバックも維持する。
+// 戻り値は 'lost' | 'stalled' | 'active' の3値。ロストの場合は滞留かどうかを判別できないため
+// 'lost' を優先する。
+function computeParticipantStatus({ lastTimestamp, stationarySince, insideRestArea, clientStalled }) {
   const now = Date.now();
   const silentTooLong = Boolean(lastTimestamp) && now - getTimestampMs(lastTimestamp) >= STALLED_THRESHOLD_MS;
-  const stationaryTooLong = Boolean(stationarySince) && now - getTimestampMs(stationarySince) >= STATIONARY_THRESHOLD_MS;
 
-  if (!silentTooLong && !stationaryTooLong) {
-    return 'active';
+  if (silentTooLong) {
+    return 'lost';
   }
-  if (!silentTooLong && stationaryTooLong && insideRestArea) {
-    return 'active';
+
+  if (typeof clientStalled === 'boolean') {
+    return clientStalled && !insideRestArea ? 'stalled' : 'active';
   }
-  return 'stalled';
+
+  const stationaryTooLong = Boolean(stationarySince) && now - getTimestampMs(stationarySince) >= STATIONARY_THRESHOLD_MS;
+  return stationaryTooLong && !insideRestArea ? 'stalled' : 'active';
 }
 
 function getParticipantsFromMemoryWithStatus() {
   const restAreas = listRestAreasFromMemory();
   return Array.from(inMemoryParticipants.values()).map((participant) => {
     const lastLocation = getLastLocationFromMemory(participant.id);
-    const status = computeStalledStatus({
+    const status = computeParticipantStatus({
       lastTimestamp: lastLocation?.timestamp || lastLocation?.created_at,
       stationarySince: participantStationarySince.get(participant.id),
       insideRestArea: lastLocation ? isInsideAnyRestArea(lastLocation.latitude, lastLocation.longitude, restAreas) : false,
+      clientStalled: participantClientStalled.get(participant.id),
     });
     return {
       ...participant,
@@ -146,6 +161,7 @@ function getParticipantsFromMemoryWithStatus() {
       last_timestamp: lastLocation?.timestamp ?? null,
       status,
       stalled: status === 'stalled',
+      lost: status === 'lost',
     };
   });
 }
@@ -178,12 +194,13 @@ async function getParticipantsWithStatus() {
   ]);
 
   return result.rows.map((row) => {
-    const status = computeStalledStatus({
+    const status = computeParticipantStatus({
       lastTimestamp: row.last_timestamp,
       stationarySince: participantStationarySince.get(row.id),
       insideRestArea: isInsideAnyRestArea(row.last_latitude, row.last_longitude, restAreas),
+      clientStalled: participantClientStalled.get(row.id),
     });
-    return { ...row, status, stalled: status === 'stalled' };
+    return { ...row, status, stalled: status === 'stalled', lost: status === 'lost' };
   });
 }
 
@@ -213,6 +230,7 @@ async function checkStalledParticipants() {
         participantId: participant.id,
         status: participant.status,
         stalled: participant.stalled,
+        lost: participant.lost,
         recordedAt: participant.last_timestamp instanceof Date
           ? participant.last_timestamp.toISOString()
           : participant.last_timestamp,
@@ -415,12 +433,15 @@ app.post('/api/auth/verify-code', async (req, res) => {
 });
 
 app.post('/api/locations', authMiddleware, async (req, res) => {
-  const { latitude, longitude, accuracy, timestamp } = req.body;
+  const { latitude, longitude, accuracy, timestamp, stalled: clientStalledInput } = req.body;
   const participantId = req.participantId;
 
   if (typeof latitude !== 'number' || typeof longitude !== 'number') {
     return res.status(400).json({ success: false, message: 'latitude and longitude must be numbers' });
   }
+
+  const clientStalled = typeof clientStalledInput === 'boolean' ? clientStalledInput : null;
+  participantClientStalled.set(participantId, clientStalled);
 
   try {
     if (!pool) {
@@ -449,10 +470,11 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
     const stationarySince = updateStationarySince(participantId, previousLocation, nextLocation);
     inMemoryLocations.set(participantId, nextLocation);
     const restAreas = await findRestAreasForLocation(latitude, longitude);
-    const status = computeStalledStatus({
+    const status = computeParticipantStatus({
       lastTimestamp: nextLocation.timestamp,
       stationarySince,
       insideRestArea: restAreas.length > 0,
+      clientStalled,
     });
     setParticipantStatus(participantId, status);
     if (restAreas.length > 0) {
@@ -482,6 +504,7 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
         recordedAt: createdAt,
         status,
         stalled: status === 'stalled',
+        lost: status === 'lost',
       },
     });
 
@@ -491,6 +514,7 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
         participantId,
         status,
         stalled: status === 'stalled',
+        lost: status === 'lost',
         recordedAt: createdAt,
       },
     });
@@ -500,6 +524,9 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
       locationId: result.rows[0].id,
       recordedAt: createdAt,
       restAreas: restAreas.map((area) => ({ id: area.id, name: area.name })),
+      status,
+      stalled: status === 'stalled',
+      lost: status === 'lost',
     });
   } catch (error) {
     console.error('Failed to save location to DB, falling back to memory:', error);
@@ -531,10 +558,11 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
     const restAreas = listRestAreasFromMemory().filter((area) =>
       isLocationInsideRestArea(latitude, longitude, area)
     );
-    const status = computeStalledStatus({
+    const status = computeParticipantStatus({
       lastTimestamp: savedTimestamp,
       stationarySince,
       insideRestArea: restAreas.length > 0,
+      clientStalled,
     });
     setParticipantStatus(participantId, status);
 
@@ -564,6 +592,7 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
         recordedAt: createdAt,
         status,
         stalled: status === 'stalled',
+        lost: status === 'lost',
       },
     });
 
@@ -573,6 +602,7 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
         participantId,
         status,
         stalled: status === 'stalled',
+        lost: status === 'lost',
         recordedAt: createdAt,
       },
     });
@@ -584,6 +614,7 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
       restAreas: restAreas.map((area) => ({ id: area.id, name: area.name })),
       status,
       stalled: status === 'stalled',
+      lost: status === 'lost',
       note: 'saved to in-memory fallback',
     });
   }

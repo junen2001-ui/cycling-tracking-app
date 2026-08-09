@@ -226,7 +226,7 @@ function focusParticipant(participantId) {
 }
 
 function isStalledVisible(entry) {
-  if (!entry.stalled) return false;
+  if (!entry.stalled && !entry.lost) return false;
   if (!entry.stalledDismissedUntil || !entry.recordedAt) return true;
   return new Date(entry.recordedAt).getTime() > new Date(entry.stalledDismissedUntil).getTime();
 }
@@ -239,17 +239,17 @@ function renderStalledList() {
   stalledCountEl.textContent = stalledEntries.length;
 
   if (stalledEntries.length === 0) {
-    stalledListEl.innerHTML = '<div class="stalled-empty">停滞中の参加者はいません</div>';
+    stalledListEl.innerHTML = '<div class="stalled-empty">滞留・ロスト中の参加者はいません</div>';
     return;
   }
 
   stalledListEl.innerHTML = '';
   stalledEntries.forEach((entry) => {
     const card = document.createElement('div');
-    card.className = 'stalled-card';
+    card.className = entry.lost ? 'stalled-card lost' : 'stalled-card';
     card.innerHTML = `
       <div class="card-body">
-        <b>参加者: ${getParticipantLabel(entry.participantId)}</b>
+        <b>参加者: ${getParticipantLabel(entry.participantId)}(${entry.lost ? 'ロスト' : '滞留中'})</b>
         <div>最終更新: ${formatDateTime(entry.recordedAt)}</div>
       </div>
     `;
@@ -294,11 +294,13 @@ function renderRosterList() {
       }
     });
 
+    const statusClass = entry.lost ? 'lost' : entry.stalled ? 'stalled' : '';
+    const statusText = entry.lost ? 'ロスト' : entry.stalled ? '停滞中' : '稼働中';
     const meta = document.createElement('div');
     meta.className = 'roster-meta';
     meta.innerHTML = `
       <div>${entry.phoneNumber || '電話番号不明'}</div>
-      <div class="roster-status${entry.stalled ? ' stalled' : ''}">${entry.stalled ? '停滞中' : '稼働中'}</div>
+      <div class="roster-status${statusClass ? ` ${statusClass}` : ''}">${statusText}</div>
     `;
 
     row.appendChild(nameInput);
@@ -336,21 +338,35 @@ async function dismissStalled(participantId) {
   }
 }
 
-function createOrUpdateMarker({ participantId, latitude, longitude, accuracy, recordedAt, status, stalled }) {
+// 「ロスト」(通信途絶)と「滞留」(通信は取れているが進んでいない)は別状態として表示する(2026-08-09)
+function statusLabel(status) {
+  if (status === 'lost') return 'ロスト';
+  if (status === 'stalled') return '停滞中';
+  return '稼働中';
+}
+
+function statusColor(status) {
+  if (status === 'lost') return '#757575';
+  if (status === 'stalled') return '#f9a825';
+  return '#ff5722';
+}
+
+function createOrUpdateMarker({ participantId, latitude, longitude, accuracy, recordedAt, status, stalled, lost }) {
   if (participantId == null || latitude == null || longitude == null) {
     return;
   }
 
   const existing = getMarker(participantId);
-  const popupText = `参加者: ${getParticipantLabel(participantId)}<br>状態: ${status === 'stalled' ? '停滞中' : '稼働中'}<br>緯度: ${latitude.toFixed(6)}<br>経度: ${longitude.toFixed(6)}<br>精度: ${accuracy ?? '不明'}m<br>更新: ${formatDateTime(recordedAt)}`;
+  const popupText = `参加者: ${getParticipantLabel(participantId)}<br>状態: ${statusLabel(status)}<br>緯度: ${latitude.toFixed(6)}<br>経度: ${longitude.toFixed(6)}<br>精度: ${accuracy ?? '不明'}m<br>更新: ${formatDateTime(recordedAt)}`;
 
   if (existing) {
     existing.setLatLng([latitude, longitude]);
     existing.bindPopup(popupText, { autoPan: false });
+    existing.setStyle({ fillColor: statusColor(status) });
   } else {
     const marker = L.circleMarker([latitude, longitude], {
       radius: 8,
-      fillColor: stalled ? '#f9a825' : '#ff5722',
+      fillColor: statusColor(status),
       color: '#fff',
       weight: 2,
       opacity: 1,
@@ -365,6 +381,7 @@ function createOrUpdateMarker({ participantId, latitude, longitude, accuracy, re
     recordedAt,
     status: status || 'active',
     stalled: !!stalled,
+    lost: !!lost,
   });
 }
 
@@ -390,6 +407,7 @@ async function fetchParticipants() {
           phoneNumber: participant.phone_number || null,
           status: participant.status || 'active',
           stalled: participant.stalled || false,
+          lost: participant.lost || false,
           recordedAt: participant.last_timestamp || null,
           stalledDismissedUntil: participant.stalled_dismissed_until || null,
         });
@@ -402,6 +420,7 @@ async function fetchParticipants() {
           recordedAt: participant.last_timestamp || null,
           status: participant.status || 'active',
           stalled: participant.stalled || false,
+          lost: participant.lost || false,
         };
 
         if (isValidLocation(entry)) {
@@ -440,14 +459,15 @@ function setupWebSocket() {
       } else if (message.type === 'participant-status-update' && message.payload) {
         const marker = getMarker(message.payload.participantId);
         if (marker) {
-          const popupText = `参加者: ${getParticipantLabel(message.payload.participantId)}<br>状態: ${message.payload.status === 'stalled' ? '停滞中' : '稼働中'}<br>更新: ${formatDateTime(message.payload.recordedAt)}`;
+          const popupText = `参加者: ${getParticipantLabel(message.payload.participantId)}<br>状態: ${statusLabel(message.payload.status)}<br>更新: ${formatDateTime(message.payload.recordedAt)}`;
           marker.bindPopup(popupText, { autoPan: false });
-          marker.setStyle({ fillColor: message.payload.stalled ? '#f9a825' : '#ff5722' });
+          marker.setStyle({ fillColor: statusColor(message.payload.status) });
         }
         updateParticipantState(message.payload.participantId, {
           recordedAt: message.payload.recordedAt,
           status: message.payload.status || 'active',
           stalled: !!message.payload.stalled,
+          lost: !!message.payload.lost,
         });
       } else if (message.type === 'participant-stalled-dismissed' && message.payload) {
         updateParticipantState(message.payload.participantId, {

@@ -187,9 +187,10 @@ docker compose version
   git commit -m "..."
   git subtree push --prefix=cycling-tracking-app origin master
   ```
-  新しいPC側で最新版を取得する場合(通常はOneDrive同期で十分だが、GitHub側にしか無い変更を取り込みたい場合):
+  新しいPC側で最新版を取得したい場合、通常はOneDrive同期で十分(`.git`もOneDrive経由で同期されるため、GitHubへの変更も自動的に反映される)。**`git subtree pull` はこのリポジトリでは使えない**(`cycling-tracking-app` が `git subtree add` ではなく通常の `git add` で追加されているため、`fatal: can't squash-merge: 'cycling-tracking-app' was never added.` で失敗することを2026-08-10に確認済み)。OneDrive同期後、念のためGitHub側と内容が一致しているか確認したい場合は次のコマンドを使う(出力が空なら差分なし):
   ```powershell
-  git subtree pull --prefix=cycling-tracking-app origin master --squash
+  git fetch origin
+  git diff HEAD:cycling-tracking-app origin/master --stat
   ```
   `.env` はGit管理対象外(秘密情報のため、`.gitignore`で除外)なので、GitHub経由では引き継がれない。OneDriveの同期に含まれる実ファイルをそのまま使うか、`src/server/.env.example` / `src/mobile/.env.example` をコピーして値を入力し直すこと。
 

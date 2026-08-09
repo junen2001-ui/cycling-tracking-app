@@ -28,7 +28,9 @@ import {
   setAuthExpiredHandler,
 } from './src/api/client';
 import { connectWebSocket, closeWebSocket } from './src/websocket/socket';
+import { evaluateLocationForSending, markLocationSent, clearTrail } from './src/route/trailStorage';
 import { styles, colors } from './src/styles';
+import { LOCATION_SEND_INTERVAL_MS } from './src/config';
 
 import SplashScreen from './src/screens/SplashScreen';
 import AuthPhoneScreen from './src/screens/AuthPhoneScreen';
@@ -176,23 +178,38 @@ export default function App() {
 
   async function startForegroundWatch() {
     if (foregroundWatchRef.current) return;
+    // 精度は「バランス」ではなく「高精度」を使う(2026-08-09、実機検証を踏まえ再調整。詳細はconfig.js参照)。
+    // 「移動25m未満は送信しない」もOSのdistanceIntervalに任せず(直線距離のみの判定で実際の移動を
+    // 検知し損ねる問題があったため)、trailStorage.evaluateLocationForSending() で自前に判定する
     foregroundWatchRef.current = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.High, timeInterval: 15000, distanceInterval: 0 },
+      {
+        accuracy: Location.Accuracy.High,
+        timeInterval: LOCATION_SEND_INTERVAL_MS,
+        distanceInterval: 0,
+      },
       async (position) => {
+        const { shouldSend, stalled } = await evaluateLocationForSending({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          heading: position.coords.heading,
+          timestamp: position.timestamp,
+        });
+        if (!shouldSend) return;
+
         const result = await postLocation(
           {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
             accuracy: position.coords.accuracy,
             timestamp: new Date().toISOString(),
+            stalled,
           },
           tokenRef.current
         );
         if (result.success) {
+          await markLocationSent({ latitude: position.coords.latitude, longitude: position.coords.longitude });
           setLocationStatusText(`最終送信: ${new Date().toLocaleTimeString()}`);
-          if (typeof result.stalled === 'boolean') {
-            setStatus(result.stalled ? 'stalled' : 'active');
-          }
+          setStatus(stalled ? 'stalled' : 'active');
         } else if (!result.networkError) {
           setLocationError(result.message || '位置情報の送信に失敗しました。');
         } else {
@@ -287,39 +304,58 @@ export default function App() {
     participantIdRef.current = result.participantId;
     setParticipantId(result.participantId);
     await saveCredentials(result.token, result.participantId);
+    // 新しいログイン=新しいライドの開始とみなし、前回の走行軌跡を持ち越さない
+    await clearTrail();
     await enterLiveScreen();
     return { success: true };
+  }
+
+  // 明示的なユーザー操作(今すぐ送信・緊急通知)の際に、間引かず高精度な現在地を取得して送信する。
+  // 呼び出し元でtry/catchすること(位置情報取得の失敗はgeolocationErrorMessageで扱う想定)。
+  async function sendFreshLocationNow() {
+    const granted = await requestForegroundPermission();
+    if (!granted) {
+      return { success: false, message: '位置情報の利用が許可されていません。端末の設定を確認してください。' };
+    }
+    const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+    const { stalled } = await evaluateLocationForSending({
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      heading: position.coords.heading,
+      timestamp: position.timestamp,
+    });
+    const result = await postLocation(
+      {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        timestamp: new Date().toISOString(),
+        stalled,
+      },
+      tokenRef.current
+    );
+
+    if (result.success) {
+      await markLocationSent({ latitude: position.coords.latitude, longitude: position.coords.longitude });
+      setLocationStatusText(`最終送信: ${new Date().toLocaleTimeString()}`);
+      setStatus(stalled ? 'stalled' : 'active');
+      return { success: true };
+    }
+    return {
+      success: false,
+      message: result.networkError
+        ? 'サーバーに接続できません。次回の送信タイミングで再試行します。'
+        : result.message || '位置情報の送信に失敗しました。',
+    };
   }
 
   async function handleSendLocationNow() {
     setSendingLocation(true);
     setLocationError('');
     try {
-      const granted = await requestForegroundPermission();
-      if (!granted) {
-        setLocationError('位置情報の利用が許可されていません。端末の設定を確認してください。');
-        return;
-      }
-      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const result = await postLocation(
-        {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-          timestamp: new Date().toISOString(),
-        },
-        tokenRef.current
-      );
-
-      if (result.success) {
-        setLocationStatusText(`最終送信: ${new Date().toLocaleTimeString()}`);
-        if (typeof result.stalled === 'boolean') {
-          setStatus(result.stalled ? 'stalled' : 'active');
-        }
-      } else if (!result.networkError) {
-        setLocationError(result.message || '位置情報の送信に失敗しました。');
-      } else {
-        setLocationError('サーバーに接続できません。次回の送信タイミングで再試行します。');
+      const result = await sendFreshLocationNow();
+      if (!result.success) {
+        setLocationError(result.message);
       }
     } catch (error) {
       setLocationError(geolocationErrorMessage(error));
@@ -330,6 +366,13 @@ export default function App() {
 
   async function handleSendIncident() {
     setIncidentError('');
+    // 緊急時は位置情報の精度が特に重要なため、通知と同時にその瞬間の高精度な現在地を取得・送信する
+    // (通常の位置情報送信は間引かれる/間隔が空くことがあるため、それに頼らない)
+    try {
+      await sendFreshLocationNow();
+    } catch (error) {
+      // 位置情報取得に失敗しても緊急通知自体は送る(サーバー側の最後の既知位置が使われる)
+    }
     const result = await postIncident({ incidentType: 'emergency', message: 'Emergency button pressed' }, tokenRef.current);
     if (result.success) {
       setLocationStatusText('緊急通知を送信しました。');
@@ -347,6 +390,7 @@ export default function App() {
     stopForegroundWatch();
     closeWebSocket();
     await clearCredentials();
+    await clearTrail();
     tokenRef.current = null;
     participantIdRef.current = null;
     setParticipantId(null);

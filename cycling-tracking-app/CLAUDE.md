@@ -11,7 +11,7 @@
 - `/api/locations` による位置情報アップロードAPIが動作している
 - `/api/participants` による参加者取得APIが動作している
 - `ws://127.0.0.1:3000` でWebSocketサーバーを実装し、`location-update` イベントをブロードキャストしている
-- 「滞留」と「ロスト」は別概念として管理している(2026-08-09、`server.js`の`computeParticipantStatus()`)。滞留はアプリ側が直近5分の移動距離(250m未満)から判定して送ってくる(`participantClientStalled`にメモリ保持)。ロストはサーバー側で「10分間無音」のみから判定する。休憩所内にいる場合は滞留とみなさない。旧バージョンのアプリ向けに、サーバー側の静止時間ヒューリスティック(`participantStationarySince`)へのフォールバックも維持している(いずれもDB永続化なし、サーバー再起動でリセット)。詳細は `progress/progress.md` の2026-08-09セクション参照。
+- 「滞留」と「ロスト」は別概念として管理している(2026-08-09実装、2026-08-10にロースト判定タイミングを修正、いずれも`server.js`の`computeParticipantStatus()`)。滞留はアプリ側が直近5分の移動距離(250m未満)から判定して送ってくる(`participantClientStalled`にメモリ保持)。**滞留中(`clientStalled: true`)はアプリが電力節約のため送信を止める仕様のため、無音時間の長さに関わらず次の「稼働中」通知が来るまで滞留のまま扱う**。ロースト(通信断)は「直近は稼働中と分かっていたのに10分間無音」の場合のみ判定する(滞留由来の意図的な無音とは区別)。休憩所内にいる場合は滞留とみなさない。旧バージョンのアプリ向けに、サーバー側の静止時間ヒューリスティック(`participantStationarySince`)へのフォールバックも維持している(いずれもDB永続化なし、サーバー再起動でリセット)。詳細は `progress/progress.md` の2026-08-10セクション参照。
 
 ## 完了したマイルストーン
 - サーバー基盤・環境構築
@@ -21,7 +21,7 @@
 - 位置情報更新のリアルタイムWebSocketブロードキャスト
 
 ## 次に取り組むこと
-- **実機検証を継続中(次回最優先、別PCで実施予定)**: 2026-08-09に実装・ローカルビルドした位置情報送信・滞留/ロースト判定の全面見直し(`mobile-preview-stalled-lost-20260809.apk`)。同日22時台に初回テストを実施し滞留判定の受信自体は確認できたが、判定タイミングの整合性が未確定(古いライド開始時刻が残っていた可能性)。ユーザーは今夜アプリを終了し翌朝以降に再テストする予定。次回セッションでの具体的な確認手順は `progress/progress.md` の2026-08-09セクション「次回(翌朝以降)のテスト手順」を参照。Oracle Cloud VMへのSSH秘密鍵(`~/.ssh/oracle_cycling_tracking`)がこのPCには未転送のため、詳細な送信履歴確認には転送が必要。
+- **未解明・軽微(次回滞留テスト時に要観察)**: 2026-08-10の実機検証で、滞留から約25分後に座標がほぼ同じ地点のまま4回連続送信が発生する謎の挙動を観測(ユーザーはスマホに触れていないと証言)。GPS再測位時のジャンプかAndroidのDoze省電力機能が疑われるが未確認。消費電力への影響は軽微なため、緊急対応は不要と判断し保留中。詳細は `progress/progress.md` の2026-08-10セクション参照。
 - `src/mobile`(参加者アプリ)の3件の不具合修正・地図機能とも実機検証まで完了(2026-08-06)。残るはiOSビルド/検証(有料のApple Developerアカウントが必要)のみ。
 - 管理画面(`admin.html`/`admin.js`)の拡張(日本語化・GPXルート表示・現在地初期表示・アラート/停滞一覧の消去)も実装・Playwright検証まで完了(2026-08-06)。詳細は `progress/progress.md` セクション11参照。
 - バックエンドの公開デプロイ(Oracle Cloud無料枠)は2026-08-07に完了。`https://217-142-249-10.nip.io` で稼働中。詳細は `progress/progress.md` の同日セクション参照。
@@ -39,7 +39,7 @@
 - 認証トークン/participantIdは `expo-secure-store` に保存している(AsyncStorageではない。資格情報のため)。
 - **実機テストには `development` ではなく `preview` のEASビルドプロファイルを使うこと。** `development`(Metro接続が必要)は、アプリを長時間バックグラウンドに置いた際にバックグラウンドタスクの実行が不安定になることを確認済み。`preview` はビルド時にJSバンドルを埋め込むため、実行時のMetro依存が無い。
 - EASプロジェクト: `@endy_jun/mobile`。**2026-08-07にEAS無料枠のAndroidビルド回数を使い切った(月次リセットは9月1日)ため、以降はWSL2(Ubuntu)上でのローカルビルドに切り替えている**。構築手順・ビルドコマンドは `progress/progress.md` の「モバイルのローカルビルド環境」セクション参照。EASクラウドビルドの無料枠が復活すれば、従来通り `EAS_SKIP_AUTO_FINGERPRINT=1 npx eas-cli build --profile preview --platform android --non-interactive` でも再ビルド可能。
-- 現時点での最新ビルド: `mobile-preview-stalled-lost-20260809.apk`(ローカルビルド、`cycling-tracking-app/build/`配下・Git管理対象外、**未検証**)。位置情報送信・滞留/ロースト判定の全面見直しを含む(詳細は下記および `progress/progress.md` の2026-08-09セクション参照)。実機で最後に確認済みのビルドは `mobile-preview-oracle-20260807.apk`(ルート配布のサーバー化・Oracle Cloud公開URL反映)。
+- 現時点での最新ビルド: `mobile-preview-stalled-lost-20260809.apk`(ローカルビルド、`cycling-tracking-app/build/`配下・Git管理対象外)。位置情報送信・滞留/ロースト判定の全面見直しを含む。**2026-08-10に終日の実機検証で、移動中の継続送信・滞留検知・滞留中の送信抑制・稼働再開の検知まで確認済み**(併せてサーバー側の未反映バグとロースト判定タイミングも修正・本番デプロイ済み)。詳細は `progress/progress.md` の2026-08-10セクション参照。
 - **位置情報の送信方針(2026-08-09見直し)**: `accuracy`は`High`固定(`Balanced`はAndroidネイティブ側で`PRIORITY_BALANCED_POWER_ACCURACY`となりWi-Fi/基地局ベースの間延びした測位になる不具合が実機で確認されたため、`Balanced`は不採用)。送信間隔は`LOCATION_SEND_INTERVAL_MS`(`src/mobile/src/config.js`、現在60秒)。「移動25m未満は送信しない」はOSの`distanceInterval`に頼らず`src/mobile/src/route/trailStorage.js`の`evaluateLocationForSending()`で軌跡データから自前に計算する(OS側の直線距離フィルタは移動を検知し損ねることがあった)。
 - **滞留(stalled)判定はアプリ側で実施**: 直近5分の移動距離が250m未満なら滞留とみなす(`STALLED_WINDOW_MS`/`STALLED_DISTANCE_THRESHOLD_M`)。**滞留に入った瞬間・滞留から復帰した瞬間のみ送信し、滞留継続中は送信しない**(電力節約、ユーザー指示)。「ロスト」(通信途絶)はサーバー側で無音時間のみから判定する別概念(`server.js`参照)。
 - 緊急ボタン押下時は`sendFreshLocationNow()`(`App.js`)で高精度な現在地を確実に取得・送信してから通知する(それまで緊急通知に位置情報が一切添付されていなかった不具合を修正)。

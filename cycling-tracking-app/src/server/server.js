@@ -131,12 +131,19 @@ function computeParticipantStatus({ lastTimestamp, stationarySince, insideRestAr
   const now = Date.now();
   const silentTooLong = Boolean(lastTimestamp) && now - getTimestampMs(lastTimestamp) >= STALLED_THRESHOLD_MS;
 
-  if (silentTooLong) {
-    return 'lost';
+  if (typeof clientStalled === 'boolean') {
+    // 滞留中はアプリが電力節約のため送信を止める仕様のため、無音であること自体が想定通り。
+    // 無音時間の長さに関わらず、次に「稼働中」の通知が来るまでは滞留のまま扱う。
+    if (clientStalled && !insideRestArea) {
+      return 'stalled';
+    }
+    // 直近で稼働中(または休憩所内)と分かっていたのに無音が続く場合のみ、通信断(ロスト)とみなす
+    return silentTooLong ? 'lost' : 'active';
   }
 
-  if (typeof clientStalled === 'boolean') {
-    return clientStalled && !insideRestArea ? 'stalled' : 'active';
+  // 旧バージョンのアプリ(clientStalledを送らない)向けフォールバック
+  if (silentTooLong) {
+    return 'lost';
   }
 
   const stationaryTooLong = Boolean(stationarySince) && now - getTimestampMs(stationarySince) >= STATIONARY_THRESHOLD_MS;

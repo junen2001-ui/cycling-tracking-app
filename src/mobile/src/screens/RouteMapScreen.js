@@ -150,7 +150,7 @@ const localStyles = StyleSheet.create({
     borderBottomWidth: 18,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
-    borderBottomColor: '#e91e63',
+    borderBottomColor: '#00e676',
   },
   controls: {
     position: 'absolute',

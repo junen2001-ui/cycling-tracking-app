@@ -102,7 +102,10 @@ export default function RouteMapScreen({ onBack }) {
           ) : null}
           {currentPosition ? (
             <Marker coordinate={currentPosition} anchor={{ x: 0.5, y: 0.5 }} rotation={currentPosition.heading} flat>
-              <View style={localStyles.headingArrow} />
+              <View style={localStyles.headingArrowWrapper}>
+                <View style={localStyles.headingArrowPuck} />
+                <View style={localStyles.headingArrow} />
+              </View>
             </Marker>
           ) : null}
         </MapView>
@@ -141,16 +144,31 @@ const localStyles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#eee',
   },
-  // 進行方向(rotation)を示す矢印。上向き(北向き)を基準に、react-native-mapsのMarker.rotationで回転させる
+  // 進行方向(rotation)を示す矢印。上向き(北向き)を基準に、react-native-mapsのMarker.rotationで回転させる。
+  // 地図の背景色に埋もれないよう、白い円(パック)を敷いた上に、鋭角の細い矢印を重ねて視認性を上げる(2026-08-10)。
+  headingArrowWrapper: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headingArrowPuck: {
+    position: 'absolute',
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+  },
   headingArrow: {
     width: 0,
     height: 0,
-    borderLeftWidth: 9,
-    borderRightWidth: 9,
-    borderBottomWidth: 18,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderBottomWidth: 24,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
-    borderBottomColor: '#00e676',
+    borderBottomColor: '#00b34d',
+    marginTop: -2,
   },
   controls: {
     position: 'absolute',

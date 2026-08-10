@@ -139,6 +139,15 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
+      // アプリを完全に終了して再起動した場合(保存済みセッションでの自動復帰を含む)は、
+      // 前回の走行軌跡・ライド開始時刻を持ち越さない。これらはAsyncStorageに永続化されており、
+      // clearTrail()が新規ログイン時にしか呼ばれていなかったため、再起動しても古いデータが
+      // 残り続け、「ライド開始からの経過時間」だけが古いまま直近データがほぼ無い状態で
+      // 滞留と誤判定される不具合があった(2026-08-10)。バックグラウンドのヘッドレスタスクは
+      // このReactコンポーネントのマウントを経由しないため、通常のバックグラウンド動作中の
+      // 軌跡はここでは消えない。
+      await clearTrail();
+
       const { token, participantId: storedParticipantId } = await loadCredentials();
       if (token && storedParticipantId) {
         setSplashMessage('ログイン情報を確認しています...');

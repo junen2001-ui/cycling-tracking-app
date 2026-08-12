@@ -100,3 +100,7 @@ ALTER TABLE participants ADD COLUMN IF NOT EXISTS stalled_dismissed_until TIMEST
 
 -- 電話番号の表記ゆれ(ハイフンの有無など)を解消するため、数字のみに正規化する(2026-08-07、Excelインポート機能追加時)
 UPDATE participant_auth SET phone_number = regexp_replace(phone_number, '\D', '', 'g') WHERE phone_number ~ '\D';
+
+-- 管理画面から参加者一覧を手動で消去する機能用(2026-08-12)。ソフトデリートとして扱い、
+-- 消去後に位置情報を受信したら自動的にNULLへ戻す(参加者自身の認証・履歴は一切消さない)。
+ALTER TABLE participants ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;

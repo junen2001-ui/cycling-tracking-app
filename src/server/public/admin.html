@@ -57,14 +57,17 @@
       display: flex;
       flex-direction: column;
     }
+    /* 参加者一覧は他パネルより件数が多くなりやすいため、縦方向の配分を多めにする */
+    .panel.panel-roster {
+      flex: 3;
+    }
     .panel-header {
       font-weight: bold;
       margin-bottom: 8px;
       flex-shrink: 0;
     }
     .alert-list,
-    .stalled-list,
-    .roster-list {
+    .stalled-list {
       display: grid;
       align-content: start;
       gap: 8px;
@@ -72,12 +75,23 @@
       min-height: 0;
       overflow-y: auto;
     }
+    .roster-list {
+      display: grid;
+      align-content: start;
+      gap: 3px;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+    }
     .roster-row {
-      border-radius: 8px;
-      padding: 8px 12px;
+      /* グリッドアイテムのデフォルトmin-width:autoのままだと、内容の自然幅より縮まらず
+         サイドバー幅からはみ出すため、明示的に0にして内部のflex縮小を機能させる */
+      min-width: 0;
+      border-radius: 6px;
+      padding: 3px 10px;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       background: #f7f9fc;
       border: 1px solid #e3e8f0;
       cursor: pointer;
@@ -90,9 +104,9 @@
       min-width: 0;
       border: 1px solid transparent;
       background: transparent;
-      font-size: 0.95rem;
+      font-size: 0.85rem;
       font-weight: bold;
-      padding: 4px 6px;
+      padding: 2px 4px;
       border-radius: 4px;
       color: #1a2b4c;
     }
@@ -102,11 +116,19 @@
       background: white;
     }
     .roster-meta {
-      font-size: 0.8rem;
+      font-size: 0.72rem;
       color: #556;
-      text-align: right;
       flex-shrink: 0;
-      line-height: 1.4;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .roster-phone {
+      color: #556;
+    }
+    .roster-status {
+      flex-shrink: 0;
     }
     .roster-status.stalled {
       color: #b06000;
@@ -115,6 +137,9 @@
     .roster-status.lost {
       color: #b00020;
       font-weight: bold;
+    }
+    .roster-delete-button {
+      flex-shrink: 0;
     }
     .roster-empty {
       color: #666;
@@ -336,7 +361,7 @@
           <div class="stalled-empty">滞留・ロスト中の参加者はいません</div>
         </div>
       </div>
-      <div class="panel">
+      <div class="panel panel-roster">
         <div class="panel-header">
           参加者一覧 (<span id="roster-count">0</span>)
         </div>

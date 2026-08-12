@@ -47,12 +47,36 @@ function createOrUpdateInMemoryParticipant(participantId) {
       created_at: now,
       updated_at: now,
       stalled_dismissed_until: null,
+      deleted_at: null,
     });
   }
 }
 
 function getCurrentIsoTimestamp() {
   return new Date().toISOString();
+}
+
+// 管理画面から消去(ソフトデリート)された参加者が、その後も位置情報を送ってきた場合は
+// 自動的に一覧へ復活させる(ユーザー指示)。認証情報・位置情報履歴は消去時も一切消していない。
+async function reviveParticipantIfDeleted(participantId) {
+  try {
+    if (!pool) {
+      throw new Error('DATABASE_URL is not configured');
+    }
+    const result = await pool.query(
+      'UPDATE participants SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL RETURNING id',
+      [participantId]
+    );
+    if (result.rowCount > 0) {
+      broadcastMessage({ type: 'participant-revived', payload: { participantId } });
+    }
+  } catch (error) {
+    const existing = inMemoryParticipants.get(participantId);
+    if (existing && existing.deleted_at) {
+      inMemoryParticipants.set(participantId, { ...existing, deleted_at: null });
+      broadcastMessage({ type: 'participant-revived', payload: { participantId } });
+    }
+  }
 }
 
 // 電話番号の表記ゆれ(ハイフンの有無など)を吸収するため、数字のみに正規化する。
@@ -169,6 +193,7 @@ function getParticipantsFromMemoryWithStatus() {
       status,
       stalled: status === 'stalled',
       lost: status === 'lost',
+      deleted: Boolean(participant.deleted_at),
     };
   });
 }
@@ -180,7 +205,7 @@ async function getParticipantsWithStatus() {
 
   const [result, restAreas] = await Promise.all([
     pool.query(
-      `SELECT p.id, p.display_name, p.status, p.created_at, p.stalled_dismissed_until,
+      `SELECT p.id, p.display_name, p.status, p.created_at, p.stalled_dismissed_until, p.deleted_at,
               a.phone_number,
               l.latitude AS last_latitude,
               l.longitude AS last_longitude,
@@ -207,7 +232,7 @@ async function getParticipantsWithStatus() {
       insideRestArea: isInsideAnyRestArea(row.last_latitude, row.last_longitude, restAreas),
       clientStalled: participantClientStalled.get(row.id),
     });
-    return { ...row, status, stalled: status === 'stalled', lost: status === 'lost' };
+    return { ...row, status, stalled: status === 'stalled', lost: status === 'lost', deleted: Boolean(row.deleted_at) };
   });
 }
 
@@ -449,6 +474,7 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
 
   const clientStalled = typeof clientStalledInput === 'boolean' ? clientStalledInput : null;
   participantClientStalled.set(participantId, clientStalled);
+  await reviveParticipantIfDeleted(participantId);
 
   try {
     if (!pool) {
@@ -758,6 +784,36 @@ app.post('/api/participants/import-roster', async (req, res) => {
     console.error('Failed to import participant roster:', error);
     return res.status(500).json({ success: false, message: error.message || 'import failed' });
   }
+});
+
+app.delete('/api/participants/:id', async (req, res) => {
+  const participantId = req.params.id;
+  const deletedAt = new Date().toISOString();
+
+  try {
+    if (!pool) {
+      throw new Error('DATABASE_URL is not configured');
+    }
+
+    await pool.query('UPDATE participants SET deleted_at = $1 WHERE id = $2', [deletedAt, participantId]);
+  } catch (error) {
+    console.error('Failed to persist participant deletion to DB, falling back to memory:', error);
+    const existing = inMemoryParticipants.get(participantId);
+    if (existing) {
+      inMemoryParticipants.set(participantId, { ...existing, deleted_at: deletedAt });
+    }
+  }
+
+  // ソフトデリート: 認証情報・位置情報履歴は一切消さない。次に位置情報を受信した時点で
+  // 自動的にdeleted_atをクリアする(POST /api/locations参照)ため、まだ稼働中の参加者を
+  // 消去してもすぐに一覧へ戻ってくる。「一覧が煩雑になった非アクティブな参加者を片付ける」
+  // 用途を想定している。
+  broadcastMessage({
+    type: 'participant-deleted',
+    payload: { participantId },
+  });
+
+  return res.json({ success: true, participantId, deletedAt });
 });
 
 app.post('/api/participants/:id/dismiss-stalled', async (req, res) => {

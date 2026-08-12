@@ -193,6 +193,15 @@ function getMarker(participantId) {
   return markers.get(participantId);
 }
 
+function removeMarker(participantId) {
+  const marker = markers.get(participantId);
+  if (marker) {
+    map.removeLayer(marker);
+    markers.delete(participantId);
+    updateParticipantCount();
+  }
+}
+
 function isValidLocation(location) {
   return (
     location &&
@@ -226,6 +235,7 @@ function focusParticipant(participantId) {
 }
 
 function isStalledVisible(entry) {
+  if (entry.deleted) return false;
   if (!entry.stalled && !entry.lost) return false;
   if (!entry.stalledDismissedUntil || !entry.recordedAt) return true;
   return new Date(entry.recordedAt).getTime() > new Date(entry.stalledDismissedUntil).getTime();
@@ -260,9 +270,11 @@ function renderStalledList() {
 }
 
 function renderRosterList() {
-  const entries = Array.from(participants.values()).sort((a, b) =>
-    (a.displayName || '').localeCompare(b.displayName || '', 'ja')
-  );
+  // 消去済み(deleted)の参加者はGET /api/participants自体には含まれる(参加者アプリ自身の
+  // 状態表示を壊さないため)が、管理画面の一覧表示だけはここでフィルタして除外する
+  const entries = Array.from(participants.values())
+    .filter((entry) => !entry.deleted)
+    .sort((a, b) => (a.displayName || '').localeCompare(b.displayName || '', 'ja'));
 
   rosterCountEl.textContent = entries.length;
 
@@ -299,15 +311,44 @@ function renderRosterList() {
     const meta = document.createElement('div');
     meta.className = 'roster-meta';
     meta.innerHTML = `
-      <div>${entry.phoneNumber || '電話番号不明'}</div>
-      <div class="roster-status${statusClass ? ` ${statusClass}` : ''}">${statusText}</div>
+      <span class="roster-phone">${entry.phoneNumber || '電話番号不明'}</span>
+      <span class="roster-status${statusClass ? ` ${statusClass}` : ''}">${statusText}</span>
     `;
+
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'dismiss-button roster-delete-button';
+    deleteButton.title = '一覧から消去';
+    deleteButton.textContent = '✕';
+    deleteButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const label = entry.displayName && entry.displayName !== 'Participant' ? entry.displayName : entry.participantId;
+      if (window.confirm(`${label} を参加者一覧から消去しますか?\n(位置情報の送信が再開されると自動的に一覧へ戻ります)`)) {
+        deleteParticipant(entry.participantId);
+      }
+    });
 
     row.appendChild(nameInput);
     row.appendChild(meta);
+    row.appendChild(deleteButton);
     row.addEventListener('click', () => focusParticipant(entry.participantId));
     rosterListEl.appendChild(row);
   });
+}
+
+async function deleteParticipant(participantId) {
+  try {
+    const response = await fetch(`/api/participants/${participantId}`, { method: 'DELETE' });
+    const data = await response.json();
+    if (data.success) {
+      updateParticipantState(participantId, { deleted: true });
+    } else {
+      alert(data.message || '参加者の消去に失敗しました。');
+    }
+  } catch (error) {
+    console.error('Failed to delete participant', error);
+    alert('参加者の消去に失敗しました(通信エラー)。');
+  }
 }
 
 async function saveParticipantName(participantId, displayName) {
@@ -353,6 +394,10 @@ function statusColor(status) {
 
 function createOrUpdateMarker({ participantId, latitude, longitude, accuracy, recordedAt, status, stalled, lost }) {
   if (participantId == null || latitude == null || longitude == null) {
+    return;
+  }
+  // 消去済み(deleted)の参加者は、復活イベントを受け取るまで地図上にも表示しない
+  if (participants.get(participantId)?.deleted) {
     return;
   }
 
@@ -408,6 +453,7 @@ async function fetchParticipants() {
           status: participant.status || 'active',
           stalled: participant.stalled || false,
           lost: participant.lost || false,
+          deleted: participant.deleted || false,
           recordedAt: participant.last_timestamp || null,
           stalledDismissedUntil: participant.stalled_dismissed_until || null,
         });
@@ -423,7 +469,7 @@ async function fetchParticipants() {
           lost: participant.lost || false,
         };
 
-        if (isValidLocation(entry)) {
+        if (isValidLocation(entry) && !participant.deleted) {
           createOrUpdateMarker(entry);
         }
       });
@@ -485,6 +531,12 @@ function setupWebSocket() {
           status: message.payload.status || 'active',
           stalled: false,
         });
+      } else if (message.type === 'participant-deleted' && message.payload) {
+        updateParticipantState(message.payload.participantId, { deleted: true });
+        removeMarker(message.payload.participantId);
+      } else if (message.type === 'participant-revived' && message.payload) {
+        // 一覧・地図への復帰そのものは、直後に届く location-update / participant-status-update で行われる
+        updateParticipantState(message.payload.participantId, { deleted: false });
       } else if (message.type === 'incident-alert' && message.payload) {
         renderIncidentAlert(message.payload);
       } else if (message.type === 'incident-dismissed' && message.payload) {

@@ -33,6 +33,9 @@
 - `POST /api/routes/:id/share` — ルートを共有済みとして記録(`shared_at`を設定)
 - `GET /api/usage/summary` — Places/Directions/Elevation API の今月の呼び出し回数の目安を取得(コスト管理用)
 
+## テスト
+`cd src/server && npm test` でユニットテスト(Node.js組み込みのテストランナー、`.env`読み込みのため`dotenv/config`をプリロード)を実行できる。標高計算・営業時間判定・ポリラインデコード・帰りルートのオフセット計算など、外部API呼び出しを伴わない純粋ロジック部分をカバーしている(Google APIキーが無くても実行可能)。
+
 ## コスト管理
 - Places / Directions / Elevation の呼び出しはすべて `api_usage_logs` テーブルに記録される(`src/server/lib/googleMaps.js`)。
 - `GET /api/usage/summary` で当月の呼び出し回数を確認できる。$200無料枠を超えないよう、実運用開始後は定期的に確認すること。

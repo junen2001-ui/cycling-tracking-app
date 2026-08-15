@@ -1,5 +1,17 @@
 # 進捗
 
+## 2026-08-16: バックエンドのユニットテストを追加
+API キー無しでも検証できる純粋ロジック部分(標高計算・営業時間判定・ポリラインデコード・帰りルート用オフセット計算)にユニットテストを追加した。Google Maps APIキーの取得待ちの間、実データ検証はまだできないため、代わりにコードの正しさを固める目的。
+
+- `src/server/test/geo.test.js`: `haversineDistanceMeters`(既知の緯度1度分の距離)、`offsetMidpointPerpendicular`(中点からのオフセット距離・直交方向)
+- `src/server/test/polyline.test.js`: `decodePolyline`をGoogle公式ドキュメントのサンプル文字列でデコード検証
+- `src/server/test/openingHours.test.js`: `isOpenAt`の通常営業・24時間営業・日をまたぐ深夜営業・曜日不一致・情報無し(null)の各パターン
+- `src/server/test/routeBuilder.test.js`: `calculateElevationGainM`(上昇分のみ合算、下降は無視)
+- `services/routeBuilder.js`から`calculateElevationGainM`をexport(テスト用、動作は変更無し)
+- `package.json`に`npm test`(`node -r dotenv/config --test`、Node.js組み込みテストランナー)を追加。`-r dotenv/config`が必要な理由: `routeBuilder.js`が`lib/googleMaps.js`→`lib/apiUsage.js`→`lib/db.js`を経由して読み込まれ、`lib/db.js`は`DATABASE_URL`未設定だとrequire時点で例外を投げるため。
+
+全15件パス済み(`cd src/server && npm test`)。
+
 ## 2026-08-15: プロジェクト初期構築(仕様書読み込み → README/progress作成 → バックエンド・モバイル雛形実装)
 [cycling-tracking-app](../../cycling-tracking-app)(本体アプリ)の構成・技術スタックを踏襲する形で、`docs/`・`progress/`・`src/server`・`src/mobile` のディレクトリ構成を新規作成し、[specification.md](../docs/specification.md)に基づきMVPの初期実装を行った。
 
@@ -75,3 +87,8 @@
 - [x] 完了 - RideLogテーブル作成
 - [ ] 未着手 - 実走フィードバック収集機能
 - [ ] 未着手 - 過去ルート参照(source_route_id)を使ったレコメンド
+
+### 6. テスト
+- [x] 完了 - 純粋ロジック部分(標高計算・営業時間判定・ポリラインデコード・オフセット計算)のユニットテスト(2026-08-16)
+- [ ] 未着手 - shopSearch/routeBuilderの結合テスト(Google APIをモック化)
+- [ ] 未着手 - APIエンドポイントの統合テスト(実際のPlaces/Directions/Elevationレスポンスを使った検証)

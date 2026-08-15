@@ -96,4 +96,4 @@ async function buildRoundTripRoute({ start, destination }) {
   };
 }
 
-module.exports = { buildRoundTripRoute };
+module.exports = { buildRoundTripRoute, calculateElevationGainM };

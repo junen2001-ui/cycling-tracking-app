@@ -68,7 +68,7 @@
     .stalled-list {
       display: grid;
       align-content: start;
-      gap: 8px;
+      gap: 3px;
       flex: 1;
       min-height: 0;
       overflow-y: auto;
@@ -146,11 +146,11 @@
     .alert-card,
     .rest-area-card,
     .stalled-card {
-      border-radius: 8px;
-      padding: 12px;
+      border-radius: 6px;
+      padding: 3px 10px;
       display: flex;
       justify-content: space-between;
-      align-items: flex-start;
+      align-items: center;
       gap: 8px;
     }
     .alert-card {
@@ -184,6 +184,7 @@
     /* 名前・電話番号・時刻(・状態)を1行にまとめて表示するための行。パネル幅が狭いため小さめのフォントにする */
     .card-line {
       font-size: 0.8rem;
+      line-height: 1.1;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -193,6 +194,11 @@
     .stalled-card b {
       display: inline-block;
       margin-bottom: 4px;
+    }
+    /* アラート・滞留カードは1行の.card-lineのみで下に続く内容が無いため、余計な下マージンは付けない */
+    .alert-card b.card-line,
+    .stalled-card b.card-line {
+      margin-bottom: 0;
     }
 .alert-card,
     .rest-area-card {

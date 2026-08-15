@@ -7,7 +7,7 @@
     "start": "node server.js",
     "dev": "node server.js",
     "init-db": "node db/init-db.js",
-    "test": "node -r dotenv/config --test"
+    "test": "node -r dotenv/config --experimental-test-module-mocks --test"
   },
   "dependencies": {
     "dotenv": "^16.4.2",

@@ -1,5 +1,18 @@
 # 進捗
 
+## 2026-08-16(続き): shopSearch/routeBuilderのモック結合テストを追加
+Google APIキー無しで進められる範囲として、`lib/googleMaps.js`(Google API境界)・`lib/db.js`(DB境界)だけをモック化し、`services/shopSearch.js`・`services/routeBuilder.js`本体のロジックは実物のまま通す結合テストを追加した。
+
+- `test/routeBuilder.integration.test.js`: bicycling失敗時のdrivingフォールバック、帰りルートのwaypoint付与とwaypoint失敗時の無waypoint再試行、bicycling/driving両方失敗時に例外を投げること、行き→帰り通しの標高プロファイル結合(距離オフセット)と獲得標高計算を検証。
+- `test/shopSearch.test.js`: 営業時間不明の店舗を除外せず候補に含めること、到着予想時刻に閉店確実な店舗を除外すること、訪問済み店舗を除外しPlace Details呼び出し自体を避けること(コスト削減の実効性を確認)、往復獲得標高がキャッシュされ2回目以降Directions/Elevationを呼ばないこと、候補が距離順・最大5件に制限されることを検証。
+- **モック方式**: Node.js組み込みテストランナーの`mock.module()`(Node 22+の実験的機能、`--experimental-test-module-mocks`フラグが必要)を使用。ハマった点2つ:
+  1. 相対パス指定は拡張子(`.js`)を省略するとESM解決で`ERR_MODULE_NOT_FOUND`になる。`'../lib/googleMaps.js'`のように明示する必要がある。
+  2. `shopSearch.js`は`const { pool } = require('../lib/db')`と分割代入で束縛するため、モック側の`pool`を素朴に`let`変数の再代入や`get`アクセサで差し替えても、テストごとの差し替えが反映されない(束縛時点の値のまま固定される)。固定の`queryメソッド`を持つ委譲オブジェクト(内部で実体だけを`beforeEach`ごとに差し替え)にする必要があった。
+- テストが実際にバグを検知できることも確認済み(訪問済み除外のfilter条件を一時的に無効化→該当テストが失敗することを確認→元に戻した上で全テスト再度パス)。
+- `package.json`の`npm test`に`--experimental-test-module-mocks`を追加。
+
+全26件パス済み(`cd src/server && npm test`)。
+
 ## 2026-08-16: バックエンドのユニットテストを追加
 API キー無しでも検証できる純粋ロジック部分(標高計算・営業時間判定・ポリラインデコード・帰りルート用オフセット計算)にユニットテストを追加した。Google Maps APIキーの取得待ちの間、実データ検証はまだできないため、代わりにコードの正しさを固める目的。
 
@@ -90,5 +103,5 @@ API キー無しでも検証できる純粋ロジック部分(標高計算・営
 
 ### 6. テスト
 - [x] 完了 - 純粋ロジック部分(標高計算・営業時間判定・ポリラインデコード・オフセット計算)のユニットテスト(2026-08-16)
-- [ ] 未着手 - shopSearch/routeBuilderの結合テスト(Google APIをモック化)
+- [x] 完了 - shopSearch/routeBuilderの結合テスト(Google API・DBをモック化)(2026-08-16)
 - [ ] 未着手 - APIエンドポイントの統合テスト(実際のPlaces/Directions/Elevationレスポンスを使った検証)

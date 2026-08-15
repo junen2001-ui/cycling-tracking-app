@@ -34,7 +34,9 @@
 - `GET /api/usage/summary` — Places/Directions/Elevation API の今月の呼び出し回数の目安を取得(コスト管理用)
 
 ## テスト
-`cd src/server && npm test` でユニットテスト(Node.js組み込みのテストランナー、`.env`読み込みのため`dotenv/config`をプリロード)を実行できる。標高計算・営業時間判定・ポリラインデコード・帰りルートのオフセット計算など、外部API呼び出しを伴わない純粋ロジック部分をカバーしている(Google APIキーが無くても実行可能)。
+`cd src/server && npm test` でテストを実行できる(Node.js組み込みのテストランナー、`.env`読み込みのため`dotenv/config`をプリロード、モジュールモックのため`--experimental-test-module-mocks`を使用)。Google APIキーが無くても実行可能。
+- 純粋ロジックのユニットテスト: 標高計算・営業時間判定・ポリラインデコード・帰りルートのオフセット計算(`test/geo.test.js` 等)
+- `lib/googleMaps.js`(Google API境界)・`lib/db.js`(DB境界)だけをモック化した結合テスト: `services/routeBuilder.js`のbicycling→drivingフォールバック・waypointリトライ・標高プロファイル結合(`test/routeBuilder.integration.test.js`)、`services/shopSearch.js`の営業時間フィルタ・訪問済み除外・標高キャッシュ・件数制限(`test/shopSearch.test.js`)
 
 ## コスト管理
 - Places / Directions / Elevation の呼び出しはすべて `api_usage_logs` テーブルに記録される(`src/server/lib/googleMaps.js`)。

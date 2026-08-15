@@ -45,7 +45,7 @@
 ## モバイルアプリの起動方法
 1. `cd src/mobile && npm install`
 2. `src/mobile/src/config.js` の `API_BASE_URL` を開発機のLAN IP:3000に合わせて変更する(cycling-tracking-appと同様の理由。実機テスト時は同じWi-Fi上からアクセスできるIPが必要)。
-3. `src/mobile/app.json` の `plugins` → `react-native-maps` → `androidGoogleMapsApiKey` に実際のGoogle Maps APIキーを設定する(現状プレースホルダーのまま)。
+3. `src/mobile/app.json` の `plugins` → `react-native-maps` → `androidGoogleMapsApiKey` に実際のGoogle Maps APIキーを設定する(現状プレースホルダーのまま)。**`app.json`はGit管理対象なので、サーバー用の`.env`のキーをそのまま使い回さないこと**。Maps SDK for Androidのみ有効化し、パッケージ名(`com.breakfastrideplanner.mobile`)+SHA-1で制限した専用キーを別途発行して使う(実機ビルド前にSHA-1を取得してから設定する)。
 4. `npx expo start` で起動(Expo Go / dev clientでの実機確認は未検証。`react-native-maps`はネイティブモジュールのためExpo Goでは動作しない可能性が高く、cycling-tracking-app同様にdev client / EASビルドが必要になる見込み)。
 
 画面遷移はライブラリを使わず`App.js`内のローカルstateで管理する(MVPは実装スピード優先の方針)。`npx expo-doctor`(21/21)・`npx expo export --platform android`(Metroバンドル)はいずれもエラー無く通過を確認済み。実機・エミュレータでの動作確認はまだ行っていない。

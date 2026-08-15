@@ -93,7 +93,7 @@ app.get(
 app.post(
   '/api/routes',
   asyncHandler(async (req, res) => {
-    const { startLocation, shopId, distanceKm, startTime } = req.body;
+    const { startLocation, shopId, startTime } = req.body;
     if (!startLocation || typeof startLocation.lat !== 'number' || typeof startLocation.lng !== 'number') {
       return res.status(400).json({ error: 'startLocation.lat / startLocation.lng is required' });
     }
@@ -123,7 +123,7 @@ app.post(
         start.lat,
         start.lng,
         startTime ? new Date(startTime) : new Date(),
-        distanceKm ?? route.distanceKm,
+        route.distanceKm,
         route.elevationGainM,
         JSON.stringify(route.elevationProfile),
         JSON.stringify(route.outboundPath),

@@ -29,7 +29,9 @@ function saveGpxFile(route) {
   const fileName = `${route.id}.gpx`;
   const filePath = path.join(GPX_DIR, fileName);
   fs.writeFileSync(filePath, buildGpxXml(route), 'utf8');
-  return path.join('data', 'gpx', fileName);
+  // DB保存用パスはOS非依存にする(path.joinはWindowsで`\`区切りになり、
+  // 将来Linuxサーバーにデプロイした際にpath.join(__dirname, ...)での復元が壊れるため)
+  return `data/gpx/${fileName}`;
 }
 
 module.exports = { buildGpxXml, saveGpxFile, GPX_DIR };

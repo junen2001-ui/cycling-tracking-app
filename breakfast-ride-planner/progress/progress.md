@@ -1,5 +1,28 @@
 # 進捗
 
+## 2026-08-16(続き2): 実際のGoogle APIキーでエンドツーエンド検証、実データで見つかったバグ2件を修正
+ユーザーがGoogle Cloudでプロジェクトを作成しPlaces API/Directions API/Elevation API/Maps SDK for Androidを有効化、APIキーを発行(`src/server/.env`の`GOOGLE_MAPS_API_KEY`にのみ設定。gitignore対象なのでコミットはされない)。実際にサーバーを起動し、出発地点を福岡市天神(33.5902, 130.4017)としてエンドツーエンドで検証した。
+
+### 検証結果(すべて実際のGoogle APIレスポンスで確認)
+- `POST /api/shops/search`: 天神エリアの実在カフェ5件(エクセルシオール カフェ、サン・フカヤ、ブルーボトルコーヒー福岡天神カフェ等)が距離・評価・営業時間付きで返ることを確認
+- `POST /api/routes`: 実際のbicyclingルート(往復)が生成され、標高プロファイル(実測値、天神エリアは標高8m前後でほぼ平坦)・獲得標高が算出されることを確認
+- `POST /api/routes/:id/gpx`・GETでのダウンロード: 実データで生成したGPXファイルの保存・ダウンロードを確認
+- `POST /api/routes/:id/share`: `shared_at`設定を確認
+- 訪問済み除外: ルートで選択した店舗が`GET /api/shops/visited`に現れ、**同条件で再検索すると候補から除外され、別の店舗に差し替わる**ことを実データで確認(コスト削減目的のPlace Details呼び出しスキップも込みで、モックテストで検証した通りの挙動が実環境でも成立)
+- `GET /api/usage/summary`: 検証一式(Nearby Search 2回・Place Details 16回・Directions 24回・Elevation 24回)で概算$0.58。無料枠に対して十分小さい
+
+### 発見して修正したバグ
+1. **`distance_km`が実際のルート距離ではなく、リクエストの希望距離で上書きされていた**(`server.js`の`POST /api/routes`)。`distanceKm ?? route.distanceKm`という実装になっており、モバイル側が常に`distanceKm`を送るため、実際に生成されたルートが1.5km(近い店舗を選んだため)でも保存される`distance_km`は希望値の20kmのままになっていた。`route.distanceKm`(実際の計算値)を常に使うよう修正。**モックテストでは検出できなかった**(モックはAPI呼び出しの構造は検証するが、実際の店舗が「近すぎる」ことで生じるこの手のズレは実データでないと表面化しない)。
+2. **`gpx_file_path`にWindows形式の区切り文字(`\`)がそのままDBへ保存されていた**(`services/gpx.js`の`path.join('data','gpx',fileName)`)。ローカル(Windows)では`path.join`で復元できるため実害は出ていなかったが、将来Linuxサーバー(cycling-tracking-appと同様Oracle Cloud等)にデプロイした際に`path.join(__dirname, route.gpx_file_path)`が壊れる。保存用パスは`` `data/gpx/${fileName}` ``で固定するよう修正。
+
+### 検証中に一時的に発生した非バグの現象(記録)
+GPXダウンロード(`GET /api/routes/:id/gpx`)がExpressの既定の404("Cannot GET")を返す現象が発生したが、原因はコードではなく**サーバー再起動時にkillしたはずの旧プロセスとの入れ替わりタイミングの問題**だった(再起動後にデバッグログを仕込んで再現したところ、新プロセスでは正しくハンドラに到達し200が返ることを確認)。サーバーを再起動した直後の動作確認では、`netstat`でPIDを取り直してから確認するなど、確実に新プロセスに当たっていることを意識すること。
+
+### 未対応(モバイル側)
+モバイル(`app.json`の`react-native-maps`用Androidキー)には**まだこのキーを設定していない**。理由: このキーはPlaces/Directions/Elevationの呼び出し権限を持つ制限なしキーであり、`app.json`はGit管理対象(コミットされる)のため、そのまま埋め込むと公開リポジトリ相当の露出リスクがある。当初の方針通り、Android用には別途「Maps SDK for Androidのみ・パッケージ名+SHA-1で制限」した専用キーを、実機ビルドのタイミングで発行・設定することを推奨(README参照)。
+
+全26件のテストは今回の修正後も引き続きパス。
+
 ## 2026-08-16(続き): shopSearch/routeBuilderのモック結合テストを追加
 Google APIキー無しで進められる範囲として、`lib/googleMaps.js`(Google API境界)・`lib/db.js`(DB境界)だけをモック化し、`services/shopSearch.js`・`services/routeBuilder.js`本体のロジックは実物のまま通す結合テストを追加した。
 
@@ -77,14 +100,14 @@ API キー無しでも検証できる純粋ロジック部分(標高計算・営
 - [x] 完了 - Directions API呼び出し(bicycling→drivingフォールバック)
 - [x] 完了 - Elevation API呼び出し(標高プロファイルサンプリング)
 - [x] 完了 - API呼び出しログ記録・使用量サマリAPI
-- [ ] 未着手 - 実際のAPIキーでのエンドツーエンド検証
+- [x] 完了 - 実際のAPIキーでのエンドツーエンド検証(2026-08-16、福岡市天神エリアで確認)
 
 ### 3. 店舗検索・ルート生成
 - [x] 完了 - 候補店舗検索(距離・営業時間フィルタ・訪問済み除外)
 - [x] 完了 - 往復ルート生成(行き帰り別ルート・獲得標高算出)
 - [x] 完了 - GPXファイル生成・保存API
 - [x] 完了 - グループ共有(shared_at記録)API
-- [ ] 未着手 - 実データでの検証(店舗検索結果の精度・ルートの妥当性)
+- [x] 完了 - 実データでの検証(2026-08-16。distance_km上書きバグ・GPXパス区切り文字バグを発見・修正)
 
 ### 4. モバイルアプリ
 - [x] 完了 - Expoプロジェクト雛形(package.json, app.json, babel.config.js)

@@ -46,15 +46,6 @@ let isPlacingRestArea = false;
 let pendingRestAreaCenter = null;
 let restAreaPreviewLayer = null;
 
-const INCIDENT_TYPE_LABELS = {
-  emergency: '緊急',
-};
-
-function translateIncidentType(type) {
-  if (!type) return '不明';
-  return INCIDENT_TYPE_LABELS[type] || type.replace(/_/g, ' ');
-}
-
 function formatDateTime(value) {
   if (!value) return '不明';
   return new Date(value).toLocaleString('ja-JP');
@@ -118,11 +109,11 @@ function renderIncidentAlert(incident) {
   const card = document.createElement('div');
   card.className = 'alert-card';
   card.id = `incident-${incident.id}`;
+  // 緊急ボタン押下時にしか発生しないアラートのため、「緊急」ラベルとメッセージ本文は
+  // 冗長として表示しない(ユーザー指示、2026-08-16)。名前・電話番号・時刻のみ1行で表示する。
   card.innerHTML = `
     <div class="card-body">
-      <b>${translateIncidentType(incident.incident_type)}</b>
-      <div class="card-line">${getParticipantShortName(incident.participant_id)}・${getParticipantPhone(incident.participant_id)}・${formatTime(incident.created_at)}</div>
-      <div>${incident.message || 'メッセージなし'}</div>
+      <b class="card-line">${getParticipantShortName(incident.participant_id)}・${getParticipantPhone(incident.participant_id)}・${formatTime(incident.created_at)}</b>
     </div>
   `;
   addDismissButton(card, () => dismissIncident(incident.id));

@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "breakfast-ride-planner",
+    "slug": "breakfast-ride-planner",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.breakfastrideplanner.mobile",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "plugins": [
+      [
+        "react-native-maps",
+        {
+          "androidGoogleMapsApiKey": "REPLACE_WITH_GOOGLE_MAPS_API_KEY"
+        }
+      ]
+    ]
+  }
+}

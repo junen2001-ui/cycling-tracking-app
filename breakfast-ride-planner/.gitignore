@@ -1,0 +1,12 @@
+node_modules/
+.env
+*.log
+
+# GPXの実データは生成物なのでコミットしない
+src/server/data/gpx/*.gpx
+
+# Expo / React Native
+.expo/
+dist/
+build/
+*.apk

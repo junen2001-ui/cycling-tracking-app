@@ -1,0 +1,16 @@
+{
+  "name": "breakfast-ride-planner-server",
+  "version": "0.1.0",
+  "description": "Backend for the breakfast ride route planner MVP",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "init-db": "node db/init-db.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.2",
+    "express": "^4.19.2",
+    "pg": "^8.10.0"
+  }
+}

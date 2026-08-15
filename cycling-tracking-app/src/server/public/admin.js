@@ -60,6 +60,21 @@ function formatDateTime(value) {
   return new Date(value).toLocaleString('ja-JP');
 }
 
+// アラート・滞留パネルはイベント当日の記録のみを扱うため、日付は省略し時:分:秒だけ表示する
+function formatTime(value) {
+  if (!value) return '不明';
+  return new Date(value).toLocaleTimeString('ja-JP', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+}
+
+function getParticipantPhone(participantId) {
+  return participants.get(participantId)?.phoneNumber || '電話番号不明';
+}
+
 function updateParticipantCount() {
   participantCountEl.textContent = markers.size;
 }
@@ -106,9 +121,8 @@ function renderIncidentAlert(incident) {
   card.innerHTML = `
     <div class="card-body">
       <b>${translateIncidentType(incident.incident_type)}</b>
-      <div>参加者: ${getParticipantLabel(incident.participant_id)}</div>
+      <div class="card-line">${getParticipantShortName(incident.participant_id)}・${getParticipantPhone(incident.participant_id)}・${formatTime(incident.created_at)}</div>
       <div>${incident.message || 'メッセージなし'}</div>
-      <div style="margin-top:4px;font-size:0.9rem;color:#333;">${formatDateTime(incident.created_at)}</div>
     </div>
   `;
   addDismissButton(card, () => dismissIncident(incident.id));
@@ -150,9 +164,8 @@ function renderRestAreaAlert(entry) {
   card.innerHTML = `
     <div class="card-body">
       <b>休憩エリア入場</b>
-      <div>参加者: ${getParticipantLabel(entry.participantId)}</div>
+      <div class="card-line">${getParticipantShortName(entry.participantId)}・${getParticipantPhone(entry.participantId)}・${formatTime(entry.recordedAt)}</div>
       <div>エリア: ${entry.restAreaName}</div>
-      <div style="margin-top:4px;font-size:0.9rem;color:#333;">${formatDateTime(entry.recordedAt)}</div>
     </div>
   `;
   // 休憩エリア入場イベントはサーバーに保存されていないため、消去はこの画面上だけの一時的な非表示になる
@@ -227,6 +240,13 @@ function getParticipantLabel(participantId) {
   return name ? `${name} (${participantId.slice(0, 8)})` : participantId;
 }
 
+// アラート・滞留パネルは電話番号もあわせて1行で表示するため、冗長なID表記は付けない簡潔な名前のみを返す
+function getParticipantShortName(participantId) {
+  const info = participants.get(participantId);
+  const name = info && info.displayName && info.displayName !== 'Participant' ? info.displayName : null;
+  return name || participantId.slice(0, 8);
+}
+
 function focusParticipant(participantId) {
   const marker = getMarker(participantId);
   if (!marker) return;
@@ -259,8 +279,7 @@ function renderStalledList() {
     card.className = entry.lost ? 'stalled-card lost' : 'stalled-card';
     card.innerHTML = `
       <div class="card-body">
-        <b>参加者: ${getParticipantLabel(entry.participantId)}(${entry.lost ? 'ロスト' : '滞留中'})</b>
-        <div>最終更新: ${formatDateTime(entry.recordedAt)}</div>
+        <b class="card-line">${getParticipantShortName(entry.participantId)}・${getParticipantPhone(entry.participantId)}・${formatTime(entry.recordedAt)}・${entry.lost ? 'ロスト' : '滞留中'}</b>
       </div>
     `;
     addDismissButton(card, () => dismissStalled(entry.participantId));

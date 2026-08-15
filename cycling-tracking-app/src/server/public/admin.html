@@ -57,10 +57,8 @@
       display: flex;
       flex-direction: column;
     }
-    /* 参加者一覧は他パネルより件数が多くなりやすいため、縦方向の配分を多めにする */
-    .panel.panel-roster {
-      flex: 3;
-    }
+    /* アラート・滞留・参加者一覧の3パネルを均等な高さ(約1/3ずつ)にする。
+       各パネルの一覧は overflow-y: auto なので、収まらない分は縦スクロールで表示される(ユーザー指示、2026-08-16)。 */
     .panel-header {
       font-weight: bold;
       margin-bottom: 8px;

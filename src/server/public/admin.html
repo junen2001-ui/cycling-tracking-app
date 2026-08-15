@@ -183,6 +183,13 @@
       background: #fbdad5;
     }
     .card-body { flex: 1; min-width: 0; }
+    /* 名前・電話番号・時刻(・状態)を1行にまとめて表示するための行。パネル幅が狭いため小さめのフォントにする */
+    .card-line {
+      font-size: 0.8rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .alert-card b,
     .rest-area-card b,
     .stalled-card b {

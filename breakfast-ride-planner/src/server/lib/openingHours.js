@@ -2,6 +2,18 @@
 // その時間帯の営業開始/終了時刻を判定する。
 // periods: [{ open: { day: 0-6(日曜=0), time: "HHMM" }, close: { day, time } }, ...]
 // 24時間営業の場合は close が存在しないことがある。
+//
+// 営業時間は店舗の現地時刻(日本時間)基準のため、曜日・時刻の算出は
+// dateTime.getDay()/getHours()のようなサーバーのOSタイムゾーン依存のメソッドを使わず、
+// 常にJST(UTC+9、日本にサマータイムは無いので固定オフセットでよい)で計算する。
+// (サーバーをUTCタイムゾーンのマシンにデプロイした際、これを怠ると営業時間判定が
+// 9時間分ずれて、実際には営業中の店舗がほぼ全て「閉店」と誤判定される不具合になる)
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+function getJstDayAndMinutes(dateTime) {
+  const jst = new Date(dateTime.getTime() + JST_OFFSET_MS);
+  return { day: jst.getUTCDay(), minutes: jst.getUTCHours() * 60 + jst.getUTCMinutes() };
+}
 
 const ALL_DAY_PERIOD = { openTime: '0000', closeTime: '2400', allDay: true };
 
@@ -17,8 +29,7 @@ function findMatchingPeriod(openingHours, dateTime) {
     return ALL_DAY_PERIOD; // 24時間営業
   }
 
-  const targetDay = dateTime.getDay();
-  const targetMinutes = dateTime.getHours() * 60 + dateTime.getMinutes();
+  const { day: targetDay, minutes: targetMinutes } = getJstDayAndMinutes(dateTime);
 
   for (const period of periods) {
     if (!period.open || !period.close) {

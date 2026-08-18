@@ -78,3 +78,26 @@ test('formatOpeningHoursText: 日をまたぐ営業も正しく整形する', ()
   };
   assert.equal(formatOpeningHoursText(openingHours, new Date(2026, 7, 18, 1, 0)), '22:00〜02:00');
 });
+
+test('isOpenAt: サーバーのOSタイムゾーンに関わらず日本時間で判定する(本番デプロイ時にUTCサーバーで発生した回帰の再発防止)', (t) => {
+  const originalTz = process.env.TZ;
+  t.after(() => {
+    process.env.TZ = originalTz;
+  });
+
+  // 日曜07:00 JST ちょうど。オフセット付きISO文字列で表しているので、
+  // どのタイムゾーンで解釈しても同じ絶対時刻を指す。
+  const sundayMorningJst = new Date('2026-08-23T07:00:00+09:00');
+  const openingHours = {
+    periods: [{ open: { day: 0, time: '0600' }, close: { day: 0, time: '1100' } }],
+  };
+
+  for (const tz of ['UTC', 'Asia/Tokyo', 'America/Los_Angeles']) {
+    process.env.TZ = tz;
+    assert.equal(
+      isOpenAt(openingHours, sundayMorningJst),
+      true,
+      `TZ=${tz}のサーバーでも日本時間の日曜07:00として営業中と判定されるべき`
+    );
+  }
+});

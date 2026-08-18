@@ -14,7 +14,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "http://192.168.1.36:3001",
+        "EXPO_PUBLIC_API_BASE_URL": "https://breakfast.217-142-249-10.nip.io",
         "ORG_GRADLE_PROJECT_reactNativeArchitectures": "arm64-v8a"
       }
     },

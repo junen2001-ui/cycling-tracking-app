@@ -1,7 +1,11 @@
 const googleMaps = require('../lib/googleMaps');
 const { decodePolyline } = require('../lib/polyline');
 const { haversineDistanceMeters, offsetMidpointPerpendicular } = require('../lib/geo');
-const { ELEVATION_SAMPLE_COUNT, RETURN_ROUTE_WAYPOINT_OFFSET_RATIO } = require('../lib/config');
+const {
+  ELEVATION_SAMPLE_COUNT,
+  RETURN_ROUTE_WAYPOINT_OFFSET_RATIO,
+  RETURN_ROUTE_MAX_DETOUR_RATIO,
+} = require('../lib/config');
 
 // bicyclingモードでルートが得られない場合(地方エリア等)は、drivingモード+幹線道路回避で
 // フォールバックする。精度は多少雑でも可という仕様上の割り切り(MVP方針)。
@@ -77,7 +81,13 @@ async function buildRoundTripRoute({ start, destination }) {
     start,
     directDistanceMeters * RETURN_ROUTE_WAYPOINT_OFFSET_RATIO
   );
-  const returnLeg = await buildSingleLeg(destination, start, returnWaypoint);
+  let returnLeg = await buildSingleLeg(destination, start, returnWaypoint);
+
+  // 迂回用waypointのせいで自転車として不自然なほど遠回りになった場合は、
+  // 周回よりも安全・直接的なルートを優先し、waypoint無しで戻る経路に切り替える。
+  if (returnLeg.distanceMeters > outbound.distanceMeters * RETURN_ROUTE_MAX_DETOUR_RATIO) {
+    returnLeg = await buildSingleLeg(destination, start, null);
+  }
 
   const outboundDistanceKm = outbound.distanceMeters / 1000;
   const returnDistanceKm = returnLeg.distanceMeters / 1000;

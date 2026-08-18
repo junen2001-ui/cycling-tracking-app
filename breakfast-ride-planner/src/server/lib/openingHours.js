@@ -1,22 +1,28 @@
-// Google Places の opening_hours.periods 形式を使って、指定日時に営業中かどうかを判定する。
+// Google Places の opening_hours.periods 形式を使って、指定日時に営業中かどうか・
+// その時間帯の営業開始/終了時刻を判定する。
 // periods: [{ open: { day: 0-6(日曜=0), time: "HHMM" }, close: { day, time } }, ...]
 // 24時間営業の場合は close が存在しないことがある。
-function isOpenAt(openingHours, dateTime) {
+
+const ALL_DAY_PERIOD = { openTime: '0000', closeTime: '2400', allDay: true };
+
+// dateTimeの曜日・時刻に該当する営業時間帯(period)を返す。無ければnull。
+// 24時間営業の場合はallDay:trueの擬似periodを返す。
+function findMatchingPeriod(openingHours, dateTime) {
   if (!openingHours || !Array.isArray(openingHours.periods)) {
     return null; // 営業時間情報が確認できない
   }
 
   const periods = openingHours.periods;
   if (periods.length === 1 && !periods[0].close) {
-    return true; // 24時間営業
+    return ALL_DAY_PERIOD; // 24時間営業
   }
 
   const targetDay = dateTime.getDay();
   const targetMinutes = dateTime.getHours() * 60 + dateTime.getMinutes();
 
-  return periods.some((period) => {
+  for (const period of periods) {
     if (!period.open || !period.close) {
-      return false;
+      continue;
     }
     const openMinutes = timeStringToMinutes(period.open.time);
     const closeMinutes = timeStringToMinutes(period.close.time);
@@ -24,16 +30,46 @@ function isOpenAt(openingHours, dateTime) {
 
     if (dayDiff === 0 && closeMinutes > openMinutes) {
       // 当日中に閉店する通常のケース
-      return targetDay === period.open.day && targetMinutes >= openMinutes && targetMinutes < closeMinutes;
+      if (targetDay === period.open.day && targetMinutes >= openMinutes && targetMinutes < closeMinutes) {
+        return { openTime: period.open.time, closeTime: period.close.time, allDay: false };
+      }
+      continue;
     }
 
     // 日をまたぐ営業(深夜営業など)
-    const isOpenDayPortion =
-      targetDay === period.open.day && targetMinutes >= openMinutes;
-    const isCloseDayPortion =
-      targetDay === period.close.day && targetMinutes < closeMinutes;
-    return isOpenDayPortion || isCloseDayPortion;
-  });
+    const isOpenDayPortion = targetDay === period.open.day && targetMinutes >= openMinutes;
+    const isCloseDayPortion = targetDay === period.close.day && targetMinutes < closeMinutes;
+    if (isOpenDayPortion || isCloseDayPortion) {
+      return { openTime: period.open.time, closeTime: period.close.time, allDay: false };
+    }
+  }
+
+  return null;
+}
+
+// 指定日時に営業中かどうか。true/false/null(不明)を返す。
+function isOpenAt(openingHours, dateTime) {
+  if (!openingHours || !Array.isArray(openingHours.periods)) {
+    return null;
+  }
+  return findMatchingPeriod(openingHours, dateTime) !== null;
+}
+
+// "HHMM" → "HH:MM"
+function formatTime(time) {
+  return `${time.slice(0, 2)}:${time.slice(2, 4)}`;
+}
+
+// 表示用の営業時間文字列("07:00〜14:00" / "24時間営業" / null)を返す
+function formatOpeningHoursText(openingHours, dateTime) {
+  const period = findMatchingPeriod(openingHours, dateTime);
+  if (!period) {
+    return null;
+  }
+  if (period.allDay) {
+    return '24時間営業';
+  }
+  return `${formatTime(period.openTime)}〜${formatTime(period.closeTime)}`;
 }
 
 function timeStringToMinutes(time) {
@@ -42,4 +78,4 @@ function timeStringToMinutes(time) {
   return hours * 60 + minutes;
 }
 
-module.exports = { isOpenAt };
+module.exports = { isOpenAt, findMatchingPeriod, formatOpeningHoursText };

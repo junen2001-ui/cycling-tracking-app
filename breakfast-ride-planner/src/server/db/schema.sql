@@ -56,3 +56,14 @@ CREATE TABLE IF NOT EXISTS api_usage_logs (
 CREATE INDEX IF NOT EXISTS idx_routes_selected_shop_id ON routes (selected_shop_id);
 CREATE INDEX IF NOT EXISTS idx_routes_created_at ON routes (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_api_usage_logs_api_name_called_at ON api_usage_logs (api_name, called_at DESC);
+
+-- 候補店舗表示の「距離」を直線距離ではなく往復ルート距離にするため追加(2026-08-18)
+ALTER TABLE shops ADD COLUMN IF NOT EXISTS route_distance_round_trip_km DOUBLE PRECISION;
+
+-- 候補店舗に住所・公式URLを表示するため追加(2026-08-18)
+ALTER TABLE shops ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE shops ADD COLUMN IF NOT EXISTS website TEXT;
+
+-- 候補店舗を「保存」できるようにするため追加(2026-08-18)。訪問済み(routesで選択済み)とは
+-- 独立した概念で、候補からは除外せずブックマークとして保持する。
+ALTER TABLE shops ADD COLUMN IF NOT EXISTS saved_at TIMESTAMPTZ;

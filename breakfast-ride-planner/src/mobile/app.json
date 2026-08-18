@@ -19,9 +19,31 @@
       [
         "react-native-maps",
         {
-          "androidGoogleMapsApiKey": "REPLACE_WITH_GOOGLE_MAPS_API_KEY"
+          "androidGoogleMapsApiKey": "AIzaSyDisR5nAkxSDBzXlH6Z2FxW488TFxQO8CY"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "./plugins/withAndroidForceDarkDisabled",
+      "./plugins/withAndroidForceLightMode",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "出発地点の初期表示に現在地を使用するために使用します。"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "1fe7d192-a4cc-47bf-a52c-b51863f5136b"
+      }
+    },
+    "owner": "endy_jun"
   }
 }

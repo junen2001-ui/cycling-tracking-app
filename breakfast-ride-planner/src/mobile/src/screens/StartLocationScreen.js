@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Location from 'expo-location';
 import MapView, { Marker } from 'react-native-maps';
 import { getRecentStartLocations } from '../api/client';
 
@@ -13,6 +15,7 @@ const DEFAULT_REGION = {
 export default function StartLocationScreen({ onNext }) {
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [recentLocations, setRecentLocations] = useState([]);
+  const mapRef = useRef(null);
 
   useEffect(() => {
     getRecentStartLocations()
@@ -20,12 +23,40 @@ export default function StartLocationScreen({ onNext }) {
       .catch(() => setRecentLocations([]));
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          return;
+        }
+        const position = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        mapRef.current?.animateToRegion(
+          {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
+          },
+          500
+        );
+      } catch {
+        // 現在地が取得できない場合はデフォルト地点(福岡)のまま
+      }
+    })();
+  }, []);
+
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <Text style={styles.title}>出発地点を選択</Text>
       <MapView
+        ref={mapRef}
         style={styles.map}
         initialRegion={DEFAULT_REGION}
+        showsUserLocation
+        customMapStyle={[]}
         onPress={(e) => setSelectedLocation(e.nativeEvent.coordinate)}
       >
         {selectedLocation && <Marker coordinate={selectedLocation} />}
@@ -59,7 +90,7 @@ export default function StartLocationScreen({ onNext }) {
       >
         <Text style={styles.nextButtonText}>次へ</Text>
       </TouchableOpacity>
-    </View>
+    </SafeAreaView>
   );
 }
 

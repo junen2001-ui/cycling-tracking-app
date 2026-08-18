@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { isOpenAt } = require('../lib/openingHours');
+const { isOpenAt, formatOpeningHoursText } = require('../lib/openingHours');
 
 // テスト対象日時の曜日は実際のカレンダーに依存させず、その場で取得した getDay() を
 // periods側にもそのまま使うことで、テストの決定性を保つ。
@@ -50,4 +50,31 @@ test('isOpenAt: どのperiodにも一致しない曜日はfalse(不明ではな�
     periods: [{ open: { day: (DAY + 3) % 7, time: '0700' }, close: { day: (DAY + 3) % 7, time: '1400' } }],
   };
   assert.equal(isOpenAt(openingHours, REFERENCE), false);
+});
+
+test('formatOpeningHoursText: 情報が無い/該当periodが無い場合はnull', () => {
+  assert.equal(formatOpeningHoursText(null, REFERENCE), null);
+  const openingHours = {
+    periods: [{ open: { day: (DAY + 3) % 7, time: '0700' }, close: { day: (DAY + 3) % 7, time: '1400' } }],
+  };
+  assert.equal(formatOpeningHoursText(openingHours, REFERENCE), null);
+});
+
+test('formatOpeningHoursText: 24時間営業は"24時間営業"', () => {
+  const openingHours = { periods: [{ open: { day: 0, time: '0000' } }] };
+  assert.equal(formatOpeningHoursText(openingHours, REFERENCE), '24時間営業');
+});
+
+test('formatOpeningHoursText: 通常営業は"HH:MM〜HH:MM"形式', () => {
+  const openingHours = {
+    periods: [{ open: { day: DAY, time: '0700' }, close: { day: DAY, time: '1430' } }],
+  };
+  assert.equal(formatOpeningHoursText(openingHours, REFERENCE), '07:00〜14:30');
+});
+
+test('formatOpeningHoursText: 日をまたぐ営業も正しく整形する', () => {
+  const openingHours = {
+    periods: [{ open: { day: DAY, time: '2200' }, close: { day: NEXT_DAY, time: '0200' } }],
+  };
+  assert.equal(formatOpeningHoursText(openingHours, new Date(2026, 7, 18, 1, 0)), '22:00〜02:00');
 });

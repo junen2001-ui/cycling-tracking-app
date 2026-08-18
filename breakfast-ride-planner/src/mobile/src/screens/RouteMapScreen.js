@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Polyline } from 'react-native-maps';
 import { createRoute, saveRouteGpx, shareRoute } from '../api/client';
 import ElevationProfileChart from '../components/ElevationProfileChart';
@@ -42,7 +43,22 @@ export default function RouteMapScreen({ startLocation, shop, distanceKm, startT
     try {
       const updated = await shareRoute(route.id);
       setRoute(updated);
-      Alert.alert('ルートを共有しました');
+
+      const distance = Number(updated.distance_km ?? updated.distanceKm ?? route.distance_km ?? route.distanceKm).toFixed(1);
+      const elevation = Math.round(updated.elevation_gain_m ?? updated.elevationGainM ?? route.elevation_gain_m ?? route.elevationGainM);
+      const lines = [`🚲 朝食ライドのお誘い`, `行き先: ${shop?.name ?? ''}`, `往復距離: 約${distance}km / 獲得標高: ${elevation}m`];
+      if (startTime) {
+        lines.push(`出発: ${startTime.toLocaleString('ja-JP')}`);
+      }
+      if (shop?.address) {
+        lines.push(`住所: ${shop.address}`);
+      }
+      if (shop?.googleMapsUrl) {
+        lines.push(`Google Maps: ${shop.googleMapsUrl}`);
+      }
+
+      // LINE・Messenger・メール等、端末にインストールされている共有先を選べるOS標準の共有シートを開く
+      await Share.share({ message: lines.join('\n') });
     } catch (e) {
       Alert.alert('共有に失敗しました', e.message);
     }
@@ -50,21 +66,21 @@ export default function RouteMapScreen({ startLocation, shop, distanceKm, startT
 
   if (loading) {
     return (
-      <View style={styles.centered}>
+      <SafeAreaView style={styles.centered} edges={['top', 'bottom']}>
         <ActivityIndicator />
         <Text>ルートを生成しています…</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (error || !route) {
     return (
-      <View style={styles.centered}>
+      <SafeAreaView style={styles.centered} edges={['top', 'bottom']}>
         <Text style={styles.warning}>{error || 'ルートを取得できませんでした'}</Text>
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
           <Text style={styles.backButtonText}>戻る</Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -73,9 +89,10 @@ export default function RouteMapScreen({ startLocation, shop, distanceKm, startT
   const firstPoint = outboundCoords[0];
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <MapView
         style={styles.map}
+        customMapStyle={[]}
         initialRegion={
           firstPoint
             ? { ...firstPoint, latitudeDelta: 0.15, longitudeDelta: 0.15 }
@@ -110,7 +127,7 @@ export default function RouteMapScreen({ startLocation, shop, distanceKm, startT
       <TouchableOpacity style={styles.backButton} onPress={onBack}>
         <Text style={styles.backButtonText}>戻る</Text>
       </TouchableOpacity>
-    </View>
+    </SafeAreaView>
   );
 }
 

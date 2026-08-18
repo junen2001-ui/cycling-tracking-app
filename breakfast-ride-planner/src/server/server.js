@@ -4,7 +4,7 @@ const path = require('path');
 const express = require('express');
 const { pool } = require('./lib/db');
 const { getUsageSummary } = require('./lib/apiUsage');
-const { searchCandidateShops, getVisitedShops } = require('./services/shopSearch');
+const { searchCandidateShops, getVisitedShops, saveShop, unsaveShop, getSavedShops } = require('./services/shopSearch');
 const { buildRoundTripRoute } = require('./services/routeBuilder');
 const { saveGpxFile } = require('./services/gpx');
 
@@ -74,6 +74,38 @@ app.get(
   asyncHandler(async (req, res) => {
     const shops = await getVisitedShops();
     res.json(shops);
+  })
+);
+
+// 保存(ブックマーク)した店舗一覧
+app.get(
+  '/api/shops/saved',
+  asyncHandler(async (req, res) => {
+    res.json(await getSavedShops());
+  })
+);
+
+// 店舗を保存する。訪問済み判定とは独立しており、候補検索からは除外されない。
+app.post(
+  '/api/shops/:id/save',
+  asyncHandler(async (req, res) => {
+    const shop = await saveShop(req.params.id);
+    if (!shop) {
+      return res.status(404).json({ error: 'shop not found' });
+    }
+    res.json(shop);
+  })
+);
+
+// 店舗の保存を解除する
+app.delete(
+  '/api/shops/:id/save',
+  asyncHandler(async (req, res) => {
+    const shop = await unsaveShop(req.params.id);
+    if (!shop) {
+      return res.status(404).json({ error: 'shop not found' });
+    }
+    res.json(shop);
   })
 );
 

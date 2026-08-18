@@ -31,6 +31,18 @@ export function getRoutesForShop(shopId) {
   return request(`/api/shops/${shopId}/routes`);
 }
 
+export function getSavedShops() {
+  return request('/api/shops/saved');
+}
+
+export function saveShop(shopId) {
+  return request(`/api/shops/${shopId}/save`, { method: 'POST' });
+}
+
+export function unsaveShop(shopId) {
+  return request(`/api/shops/${shopId}/save`, { method: 'DELETE' });
+}
+
 export function createRoute({ startLocation, shopId, distanceKm, startTime }) {
   return request('/api/routes', {
     method: 'POST',

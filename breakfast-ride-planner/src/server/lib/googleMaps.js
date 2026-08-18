@@ -1,6 +1,11 @@
 const { recordApiUsage } = require('./apiUsage');
+const { NEARBY_SEARCH_MAX_PAGES, NEARBY_SEARCH_PAGE_TOKEN_DELAY_MS } = require('./config');
 
 const BASE_URL = 'https://maps.googleapis.com/maps/api';
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function getApiKey() {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
@@ -30,26 +35,49 @@ async function callGoogleApi(apiName, path, params) {
   return data;
 }
 
-// カフェ・モーニング提供店の検索(Nearby Search)
+// カフェ・モーニング提供店の検索(Nearby Search)。
+// Googleは1ページ最大20件・最大3ページ(60件)まで返す。1ページ目はGoogle側の「知名度」順の
+// ため、検索半径が広い場合は1ページ目だけだと隠れた名店等が候補プールに入らないことがある。
+// next_page_tokenがある限り(最大3ページまで)追加取得する。
 async function searchNearbyCafes({ lat, lng, radiusMeters }) {
-  const data = await callGoogleApi('places_nearby_search', '/place/nearbysearch/json', {
+  const baseParams = {
     location: `${lat},${lng}`,
     radius: Math.min(Math.round(radiusMeters), 50000),
     type: 'cafe',
     keyword: 'モーニング breakfast',
     language: 'ja',
-  });
-  return data.results || [];
+  };
+
+  let allResults = [];
+  let pageToken;
+  for (let page = 0; page < NEARBY_SEARCH_MAX_PAGES; page += 1) {
+    const params = pageToken ? { pagetoken: pageToken } : baseParams;
+    if (pageToken) {
+      // 発行直後のpagetokenはしばらく無効なため、Googleの案内に従い少し待つ
+      await sleep(NEARBY_SEARCH_PAGE_TOKEN_DELAY_MS);
+    }
+    const data = await callGoogleApi('places_nearby_search', '/place/nearbysearch/json', params);
+    allResults = allResults.concat(data.results || []);
+    pageToken = data.next_page_token;
+    if (!pageToken) {
+      break;
+    }
+  }
+  return allResults;
 }
 
-// 営業時間の詳細を取得(Nearby Searchのopen_nowだけでは週間の営業時間が分からないため)
-async function getPlaceOpeningHours(placeId) {
+// 店舗詳細を取得(Nearby Searchのレスポンスだけでは営業時間・住所・公式URLが分からないため)
+async function getPlaceDetails(placeId) {
   const data = await callGoogleApi('places_details', '/place/details/json', {
     place_id: placeId,
-    fields: 'opening_hours,rating,name,geometry',
+    fields: 'opening_hours,rating,name,geometry,formatted_address,website',
     language: 'ja',
   });
   return data.result || {};
+}
+
+function routeDistanceMeters(route) {
+  return route.legs.reduce((sum, leg) => sum + leg.distance.value, 0);
 }
 
 async function getDirectionsRoute({ origin, destination, waypoint, mode, avoidHighways }) {
@@ -61,6 +89,10 @@ async function getDirectionsRoute({ origin, destination, waypoint, mode, avoidHi
   };
   if (waypoint) {
     params.waypoints = `${waypoint.lat},${waypoint.lng}`;
+  } else {
+    // waypoint指定時はGoogle側でalternativesが無視されるため、waypoint無しの場合のみ有効。
+    // 自転車優先で遠回りを避けるため、候補の中から最短距離のルートを選ぶ。
+    params.alternatives = true;
   }
   if (avoidHighways) {
     params.avoid = 'highways';
@@ -70,7 +102,9 @@ async function getDirectionsRoute({ origin, destination, waypoint, mode, avoidHi
   if (!data.routes || data.routes.length === 0) {
     return null;
   }
-  return data.routes[0];
+  return data.routes.reduce((shortest, candidate) =>
+    !shortest || routeDistanceMeters(candidate) < routeDistanceMeters(shortest) ? candidate : shortest
+  , null);
 }
 
 // 経路(エンコード済みポリライン)に沿って一定間隔で標高をサンプリングする
@@ -84,7 +118,7 @@ async function getElevationAlongPath(encodedPolyline, samples) {
 
 module.exports = {
   searchNearbyCafes,
-  getPlaceOpeningHours,
+  getPlaceDetails,
   getDirectionsRoute,
   getElevationAlongPath,
 };

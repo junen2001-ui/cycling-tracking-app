@@ -1,24 +1,33 @@
 import { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const DISTANCE_PRESETS_KM = [20, 30, 40, 50];
+const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 
-function buildStartTime(hour, minute) {
-  const now = new Date();
-  now.setHours(Number(hour), Number(minute), 0, 0);
-  return now;
+function buildStartTime(year, month, day, hour, minute) {
+  return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), 0, 0);
 }
 
-export default function ConditionsScreen({ onNext, onBack }) {
-  const [distanceKm, setDistanceKm] = useState(String(DISTANCE_PRESETS_KM[0]));
-  const [hour, setHour] = useState('7');
-  const [minute, setMinute] = useState('00');
+export default function ConditionsScreen({ onNext, onBack, initialConditions }) {
+  // 一度指定した値(距離・出発日時)は、候補店舗画面から戻ってきたときに覚えているようにする。
+  const baseDate = initialConditions?.startTime ?? new Date();
+  const [distanceKm, setDistanceKm] = useState(
+    initialConditions ? String(initialConditions.distanceKm) : String(DISTANCE_PRESETS_KM[0])
+  );
+  const [year, setYear] = useState(String(baseDate.getFullYear()));
+  const [month, setMonth] = useState(String(baseDate.getMonth() + 1));
+  const [day, setDay] = useState(String(baseDate.getDate()));
+  const [hour, setHour] = useState(String(baseDate.getHours()));
+  const [minute, setMinute] = useState(String(baseDate.getMinutes()).padStart(2, '0'));
 
   const parsedDistance = Number(distanceKm);
-  const isValid = parsedDistance > 0 && hour !== '' && minute !== '';
+  const startTime = buildStartTime(year, month, day, hour, minute);
+  const isValidDate = !Number.isNaN(startTime.getTime());
+  const isValid = parsedDistance > 0 && hour !== '' && minute !== '' && isValidDate;
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <Text style={styles.title}>条件指定</Text>
 
       <Text style={styles.label}>希望距離(km)</Text>
@@ -42,6 +51,36 @@ export default function ConditionsScreen({ onNext, onBack }) {
         onChangeText={setDistanceKm}
         placeholder="希望距離(km)"
       />
+
+      <Text style={styles.label}>出発日</Text>
+      <View style={styles.dateRow}>
+        <TextInput
+          style={styles.yearInput}
+          keyboardType="numeric"
+          maxLength={4}
+          value={year}
+          onChangeText={setYear}
+        />
+        <Text style={styles.dateSeparator}>/</Text>
+        <TextInput
+          style={styles.dateInput}
+          keyboardType="numeric"
+          maxLength={2}
+          value={month}
+          onChangeText={setMonth}
+        />
+        <Text style={styles.dateSeparator}>/</Text>
+        <TextInput
+          style={styles.dateInput}
+          keyboardType="numeric"
+          maxLength={2}
+          value={day}
+          onChangeText={setDay}
+        />
+        <Text style={styles.weekdayLabel}>
+          {isValidDate ? `(${WEEKDAY_LABELS[startTime.getDay()]})` : '(日付が不正です)'}
+        </Text>
+      </View>
 
       <Text style={styles.label}>出発時刻</Text>
       <View style={styles.timeRow}>
@@ -69,14 +108,12 @@ export default function ConditionsScreen({ onNext, onBack }) {
         <TouchableOpacity
           style={[styles.nextButton, !isValid && styles.nextButtonDisabled]}
           disabled={!isValid}
-          onPress={() =>
-            onNext({ distanceKm: parsedDistance, startTime: buildStartTime(hour, minute) })
-          }
+          onPress={() => onNext({ distanceKm: parsedDistance, startTime })}
         >
           <Text style={styles.nextButtonText}>候補店舗を探す</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -102,6 +139,25 @@ const styles = StyleSheet.create({
     padding: 10,
     marginTop: 8,
   },
+  dateRow: { flexDirection: 'row', alignItems: 'center' },
+  yearInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    padding: 10,
+    width: 70,
+    textAlign: 'center',
+  },
+  dateInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    padding: 10,
+    width: 50,
+    textAlign: 'center',
+  },
+  dateSeparator: { marginHorizontal: 6, fontSize: 18 },
+  weekdayLabel: { marginLeft: 10, fontSize: 14, color: '#333' },
   timeRow: { flexDirection: 'row', alignItems: 'center' },
   timeInput: {
     borderWidth: 1,

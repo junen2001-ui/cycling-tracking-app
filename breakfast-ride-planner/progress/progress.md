@@ -1,5 +1,58 @@
 # 進捗
 
+## 2026-08-18(続き): Oracle Cloud VM(cycling-tracking-appと同居)への本番デプロイ
+ユーザーの希望で、cycling-tracking-appが稼働中のOracle Cloud VM(`217.142.249.10`)上に、breakfast-ride-plannerのバックエンドも同居させた。cycling-tracking-appの稼働には影響を与えていないことを確認済み。
+
+### 構成
+- **DB**: 新規コンテナは作らず、既存の`cycling-tracking-db`コンテナ(Postgres/PostGIS、`127.0.0.1:5432`のみ公開)内に`breakfast_ride_planner`という別データベースを作成(`cycling_tracking`とは独立、同一Postgresインスタンスを共有)。
+- **サーバー**: `~/app/breakfast-ride-planner/server`にコード配置(`tar`転送、cycling-tracking-appの「10. Oracle Cloud本番バックエンドへの再デプロイ」と同じ手順)。ポート3001。systemdサービス`breakfast-ride-planner.service`(`cycling-tracking.service`と同一パターン、`WorkingDirectory`と`Description`のみ変更)。
+- **公開URL**: `https://breakfast.217-142-249-10.nip.io`。Caddyfileに新しいサイトブロックを追記(`reverse_proxy 127.0.0.1:3001`)して`systemctl reload caddy`。nip.ioは任意のサブドメインが同じIPに解決される無料ワイルドカードDNSのため、`breakfast.`プレフィックスを付けるだけで別ホスト名として扱える。
+- **APIキー**: ローカル開発用(無制限)とは別に、**IPアドレス制限(`217.142.249.10`のみ)をかけた専用キー**を新規発行して使用。理由: サーバー用キーはPlaces/Directions/Elevationを呼べる強い権限を持つため、公開URL経由で誰でも呼べる状態を避けるため。
+
+### 動作確認
+- `https://breakfast.217-142-249-10.nip.io/health` が200を返すことを確認
+- `POST /api/shops/search`を公開URL経由で実行し、実際に店舗が返ることを確認(IPアドレス制限付きキーが正しく機能)
+- デプロイ作業中も`https://217-142-249-10.nip.io/api/participants`(cycling-tracking-app)が200を返し続けることを確認、影響なし
+- VMのメモリ使用量: breakfast-ride-planner.serviceは約20〜30MB(VM全体954MBのうち。1GB弱の小さいVMだが、cycling-tracking-appとの同居で問題になる兆候は今のところ無し)
+
+### 今後の注意点
+- モバイルアプリ(`src/mobile`)は現状まだローカル開発機のLAN IP(`192.168.1.36:3001`)を向いたままで、この公開URLは使っていない。外出先からも使えるようにする場合は、`eas.json`の`preview.env.EXPO_PUBLIC_API_BASE_URL`をこの公開URLに変更して再ビルドが必要(cycling-tracking-appの`build.preview.env`と同様の変更)。
+- `.env`(APIキー・DATABASE_URL)はVM上にのみ存在し、Gitには含まれない。次回別PCからこのVMにコード更新をデプロイする場合の手順はcycling-tracking-appのREADME「10. Oracle Cloud本番バックエンドへの再デプロイ」を参照(サーバーディレクトリ名を`breakfast-ride-planner/server`に読み替える)。
+- DBスキーマを変更した場合は、`ssh ... "cd ~/app/breakfast-ride-planner/server && npm run init-db"`を追加で実行すること。
+
+## Action Items(未解決・保留中の課題)
+- **地図のダークモード表示が直らない**(2026-08-18時点、保留)。ダークテーマ端末で`react-native-maps`の地図が暗い配色のまま表示される。試した対策(いずれも実機ビルドで確認済みだが効果なし):
+  - `android:forceDarkAllowed=false`をAppThemeに注入(`plugins/withAndroidForceDarkDisabled.js`)
+  - `AppCompatDelegate.setDefaultNightMode(MODE_NIGHT_NO)`をMainApplication.ktに注入(`plugins/withAndroidForceLightMode.js`)
+  - `MapView`に`customMapStyle={[]}`を明示指定(StartLocationScreen.js/RouteMapScreen.js)
+  - 実機確認で地図タイル自体は正常に読み込めている(認証エラーではない)ことは確認済みなので、Google Maps SDK側の何らかのシステムテーマ追従が原因と推測されるが未特定。ユーザー判断でこのまま保留(実用上は許容)。次回調査する場合は、Android実機のlogcatでMaps SDK関連のログを確認するか、`react-native-maps`のGitHub Issueで同様の既知事例がないか調べるとよい。
+
+## 2026-08-17: Android実機ビルド環境の構築、WSLメモリクラッシュの解消、実機検証で見つかった不具合2件を修正
+cycling-tracking-appと同じWSL2ローカルビルド環境(`~/build/breakfast-ride-planner-mobile`、Expoアカウント`endy_jun`は既にログイン済みで流用)を使い、初めてこのプロジェクトのAndroid APKをビルド・実機インストールまで行った。
+
+### サーバーのポートを3000→3001に変更
+モバイル実機テストにはバックエンドをLAN経由で常時起動しておく必要があるが、cycling-tracking-appのローカルサーバーも同じPCでポート3000を使っており、同時起動できないことが判明。`src/server/.env(.example)`の`PORT`を3001に変更し、`src/mobile/src/config.js`のデフォルトLAN URLも合わせた(README参照)。ポート3001への着信を許可するWindowsファイアウォールルールが必要(管理者権限が要る作業のためユーザーに依頼)。
+
+### 発見したDocker Composeの罠(再掲・関連)
+このセッションでもDocker Desktopが未起動だったため起動し直した。プロジェクト名を明示していない状態でのcompose upは[2026-08-15のセクション]で記録した衝突が再発しうるので注意。
+
+### WSL2がAndroidビルド中に繰り返しクラッシュした問題(解決)
+初回ビルドで`docker`/WSL自体が"Stopped"になる現象が3回連続で発生。原因はメモリ不足で、`dmesg`に`Out of memory: Killed process (java)`が記録されていた。本プロジェクトはcycling-tracking-appには無い`reanimated`/`worklets`/`gesture-handler`/`svg`(高度プロファイルグラフ用)を含み、4アーキテクチャ(arm64-v8a/armeabi-v7a/x86/x86_64)分のネイティブC++コンパイルを並列実行するとWSLのデフォルトメモリ上限(ホストの約50%、このPCでは15GB)を超えてしまうことが原因と判明。
+- 対策1: `eas.json`の`preview`プロファイルに`ORG_GRADLE_PROJECT_reactNativeArchitectures=arm64-v8a`を追加し、実機で使う1アーキテクチャのみビルド(Gradleのプロジェクトプロパティ経由でReact Native側のABIフィルタに反映される、標準的なGradle env var連携)。
+- 対策2: `~/.gradle/gradle.properties`(WSL側、プロジェクト非依存のグローバル設定)に`org.gradle.workers.max=1`・`org.gradle.parallel=false`・`org.gradle.daemon=false`・`org.gradle.jvmargs=-Xmx2048m`を設定し、Gradle自体の並列度も最小化。
+- **これでも治らなかった**(CMake/Ninjaのネイティブコンパイルはgradle.jvmargsの制御対象外のため)。最終的に`C:\Users\jun_e\.wslconfig`を新規作成し`memory=24GB`(15GBから拡張)・`swap=8GB`を設定、`wsl --shutdown`で反映(Docker Desktopも巻き込んで停止するため、再起動後に両プロジェクトのDBコンテナを`docker start`で復旧した)。これで初めてビルドが最後まで完走した。
+- **次回別PCでこの環境を再構築する場合の教訓**: cycling-tracking-appのREADMEの「WSL2ローカルビルド環境の構築」手順だけでは、reanimated等の重いネイティブモジュールを含むプロジェクトではメモリ不足でクラッシュしうる。`.wslconfig`でのメモリ拡張(ホストのRAM次第だが20GB前後を目安)と`ORG_GRADLE_PROJECT_reactNativeArchitectures=arm64-v8a`は最初から設定しておくとよい。
+
+### 実機検証で発見した不具合2件(修正済み、再ビルドで確認予定)
+1. **「次へ」ボタンが反応しない**: `App.js`で`react-native-gesture-handler`必須の`GestureHandlerRootView`ラップが抜けていた(`react-native-wagmi-charts`がgesture-handlerに依存しているため導入されていたが、ラップを忘れていた)。gesture-handlerはAndroidのタッチイベント配送に介入するため、ラップ漏れでアプリ全体のタッチ判定(地図タップ含む)が不安定になり、「次へ」有効化に必要な`selectedLocation`が更新されなかったと推測される。`App.js`のルートを`GestureHandlerRootView`でラップして解決。
+2. **ダークテーマ端末で地図が反転して見える**: Android の Force Dark機能が原因。`app.json`の`userInterfaceStyle: "light"`だけではネイティブ側の`android:forceDarkAllowed`には反映されないことを、実際に`expo prebuild`で生成される`styles.xml`で確認した。`plugins/withAndroidForceDarkDisabled.js`(新規のconfig plugin)で`AppTheme`に`android:forceDarkAllowed=false`を注入して解決。両修正とも、実際にビルドする前に`expo export`(バンドル検証)と`expo prebuild`(styles.xml生成検証、フルビルドはしない)で効果を確認してからビルドした。
+
+### ボタンとシステムナビゲーションバーの重なり(別セッションで先に修正済み)
+4画面すべてでルート要素を素の`View`から`SafeAreaView`(`react-native-safe-area-context`)に変更済み(このセクションの前の実機テストで発見・修正)。
+
+### ビルド成果物
+`breakfast-ride-planner/build/breakfast-ride-planner-preview-fix2-20260817.apk`(Git管理対象外、`.gitignore`済み)。上記2件の修正を含む。まだ実機での再検証はしていない。
+
 ## 2026-08-16(続き2): 実際のGoogle APIキーでエンドツーエンド検証、実データで見つかったバグ2件を修正
 ユーザーがGoogle Cloudでプロジェクトを作成しPlaces API/Directions API/Elevation API/Maps SDK for Androidを有効化、APIキーを発行(`src/server/.env`の`GOOGLE_MAPS_API_KEY`にのみ設定。gitignore対象なのでコミットはされない)。実際にサーバーを起動し、出発地点を福岡市天神(33.5902, 130.4017)としてエンドツーエンドで検証した。
 

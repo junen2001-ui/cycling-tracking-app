@@ -17,7 +17,7 @@ mock.module('../lib/googleMaps.js', {
   cache: true,
   exports: {
     searchNearbyCafes: async () => [],
-    getPlaceOpeningHours: async () => ({}),
+    getPlaceDetails: async () => ({}),
     getDirectionsRoute: (args) => {
       directionsCalls.push(args);
       return getDirectionsRouteImpl(args);
@@ -85,6 +85,39 @@ test('帰りルートにはoffset waypointを与え、行きとは別経路に�
   assert.ok(returnCall.waypoint, 'return leg should be given a waypoint');
   // waypointは出発地(=帰りの目的地)そのものとは異なる地点であるべき
   assert.notDeepEqual(returnCall.waypoint, START);
+});
+
+test('帰りルートがwaypoint付きで見つかっても、行きより大幅に遠回りな場合はwaypoint無しに切り替える', async () => {
+  // 呼び出し順: [1]行き(bicycling)成功(5000m) [2]帰りwaypoint+bicycling成功だが遠回り(9000m、1.5倍超)
+  // [3]帰りwaypoint無し+bicycling成功(4800m、通常の範囲)
+  const responses = [
+    makeRoute({ distanceMeters: 5000 }),
+    makeRoute({ distanceMeters: 9000 }),
+    makeRoute({ distanceMeters: 4800 }),
+  ];
+  let callCount = 0;
+  getDirectionsRouteImpl = async () => responses[callCount++];
+
+  const route = await buildRoundTripRoute({ start: START, destination: DESTINATION });
+
+  assert.equal(directionsCalls.length, 3);
+  assert.ok(directionsCalls[1].waypoint, '1回目の帰りルート試行にはwaypointが付くはず');
+  assert.equal(directionsCalls[2].waypoint, null, '遠回りすぎたので2回目はwaypoint無しで再試行するはず');
+  assert.equal(route.distanceKm, 9.8); // 5000m(行き) + 4800m(帰り、waypoint無し版を採用)
+});
+
+test('帰りルートの遠回りが許容範囲内(1.5倍以下)ならwaypointありのまま採用する', async () => {
+  const responses = [
+    makeRoute({ distanceMeters: 5000 }), // 行き
+    makeRoute({ distanceMeters: 7000 }), // 帰り(waypointあり、1.4倍で許容範囲内)
+  ];
+  let callCount = 0;
+  getDirectionsRouteImpl = async () => responses[callCount++];
+
+  const route = await buildRoundTripRoute({ start: START, destination: DESTINATION });
+
+  assert.equal(directionsCalls.length, 2, '許容範囲内なので再試行は発生しないはず');
+  assert.equal(route.distanceKm, 12); // 5000m + 7000m
 });
 
 test('帰りルートがwaypoint付きで見つからない場合、waypoint無しで再試行する', async () => {

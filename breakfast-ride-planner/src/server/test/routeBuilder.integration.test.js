@@ -29,7 +29,7 @@ mock.module('../lib/googleMaps.js', {
   },
 });
 
-const { buildRoundTripRoute } = require('../services/routeBuilder');
+const { buildRoundTripRoute, hasSignificantBacktrack } = require('../services/routeBuilder');
 
 function makeRoute({ distanceMeters, durationSeconds = 600, polyline = SAMPLE_POLYLINE }) {
   return {
@@ -58,11 +58,11 @@ test('bicyclingが両区間とも成功する場合、drivingへはフォール�
 });
 
 test('行きのbicyclingが失敗した場合、driving+avoid=highwaysにフォールバックする', async () => {
-  let callCount = 0;
-  getDirectionsRouteImpl = async ({ mode }) => {
-    callCount += 1;
-    if (callCount === 1) {
-      assert.equal(mode, 'bicycling');
+  // 行き・帰りは並列に取得されるため、呼び出しの前後関係(directionsCallsの通し番号)では
+  // なくorigin(行きはSTART発)で行き向けの呼び出しだけを絞り込んで検証する。
+  getDirectionsRouteImpl = async ({ origin, mode }) => {
+    const isOutbound = origin.lat === START.lat && origin.lng === START.lng;
+    if (isOutbound && mode === 'bicycling') {
       return null; // 行きのbicyclingは経路無し
     }
     return makeRoute({ distanceMeters: 4000 });
@@ -70,9 +70,13 @@ test('行きのbicyclingが失敗した場合、driving+avoid=highwaysにフォ�
 
   await buildRoundTripRoute({ start: START, destination: DESTINATION });
 
-  assert.equal(directionsCalls[0].mode, 'bicycling');
-  assert.equal(directionsCalls[1].mode, 'driving');
-  assert.equal(directionsCalls[1].avoidHighways, true);
+  const outboundCalls = directionsCalls.filter(
+    (call) => call.origin.lat === START.lat && call.origin.lng === START.lng
+  );
+  assert.equal(outboundCalls.length, 2);
+  assert.equal(outboundCalls[0].mode, 'bicycling');
+  assert.equal(outboundCalls[1].mode, 'driving');
+  assert.equal(outboundCalls[1].avoidHighways, true);
 });
 
 test('帰りルートにはoffset waypointを与え、行きとは別経路にする', async () => {
@@ -175,4 +179,36 @@ test('標高プロファイルは行き→帰り通しの距離オフセット�
   assert.equal(route.elevationProfile[2].distanceKm, 4); // 帰りの起点=行きの終点(距離オフセット4km)
   assert.equal(route.elevationProfile[3].distanceKm, 8);
   assert.equal(route.elevationGainM, 20); // 10→30(+20)のみ。30→20は下降なので無視
+});
+
+test('hasSignificantBacktrack: 十分離れた地点同士が近距離まで戻れば折り返しありと判定する', () => {
+  const path = [
+    { lat: 33.59, lng: 130.4 },
+    { lat: 33.591, lng: 130.401 },
+    { lat: 33.592, lng: 130.402 },
+    { lat: 33.593, lng: 130.403 },
+    { lat: 33.5901, lng: 130.4001 }, // index0から十数m圏内まで戻ってくる(往復の折り返し)
+  ];
+  assert.equal(hasSignificantBacktrack(path), true);
+});
+
+test('hasSignificantBacktrack: 一方通行の経路(戻らない)は折り返し無しと判定する', () => {
+  const path = [
+    { lat: 33.59, lng: 130.4 },
+    { lat: 33.591, lng: 130.401 },
+    { lat: 33.592, lng: 130.402 },
+    { lat: 33.593, lng: 130.403 },
+    { lat: 33.594, lng: 130.404 },
+  ];
+  assert.equal(hasSignificantBacktrack(path), false);
+});
+
+test('hasSignificantBacktrack: 近接インデックス同士(連続する点)が近いのは折り返しとみなさない', () => {
+  // minIndexGap未満の距離では偽陽性にしない(単に点が密なだけの区間を誤検知しないため)
+  const path = [
+    { lat: 33.59, lng: 130.4 },
+    { lat: 33.590001, lng: 130.400001 },
+    { lat: 33.590002, lng: 130.400002 },
+  ];
+  assert.equal(hasSignificantBacktrack(path), false);
 });

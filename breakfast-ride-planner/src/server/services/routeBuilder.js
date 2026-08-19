@@ -70,30 +70,63 @@ function calculateElevationGainM(profile) {
   return gain;
 }
 
+// 経路(点列)の中に「同じ道を行って戻る」ような自己重複区間が無いかを簡易判定する。
+// 単純に「インデックスが離れた2点が近距離」だけで判定すると、交差点やカーブ付近で
+// 点が密集する箇所(実際には往復ではない)を誤検知してしまう(実データで確認済み)。
+// そのため「経路に沿って実際に進んだ距離(累積距離の差)」がある程度大きいにも関わらず、
+// 直線距離ではほとんど戻ってきている場合のみ、往復の折り返し(スパー)とみなす。
+function hasSignificantBacktrack(path, thresholdMeters = 40, minTraveledMeters = 300) {
+  const cumulativeMeters = [0];
+  for (let i = 1; i < path.length; i += 1) {
+    cumulativeMeters.push(cumulativeMeters[i - 1] + haversineDistanceMeters(path[i - 1], path[i]));
+  }
+
+  for (let i = 0; i < path.length; i += 1) {
+    for (let j = i + 1; j < path.length; j += 1) {
+      if (cumulativeMeters[j] - cumulativeMeters[i] < minTraveledMeters) {
+        continue; // まだ十分進んでいない近傍点(カーブ・交差点の点密集)は無視
+      }
+      if (haversineDistanceMeters(path[i], path[j]) < thresholdMeters) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // 出発地〜店舗の往復ルートを生成する。行き・帰りはできるだけ異なる道を通る周回ルートとし、
 // 単純な往復折り返しは避ける(帰りにoffset waypointを与えることで実現)。
 async function buildRoundTripRoute({ start, destination }) {
-  const outbound = await buildSingleLeg(start, destination, null);
-
   const directDistanceMeters = haversineDistanceMeters(start, destination);
   const returnWaypoint = offsetMidpointPerpendicular(
     destination,
     start,
     directDistanceMeters * RETURN_ROUTE_WAYPOINT_OFFSET_RATIO
   );
-  let returnLeg = await buildSingleLeg(destination, start, returnWaypoint);
 
-  // 迂回用waypointのせいで自転車として不自然なほど遠回りになった場合は、
-  // 周回よりも安全・直接的なルートを優先し、waypoint無しで戻る経路に切り替える。
-  if (returnLeg.distanceMeters > outbound.distanceMeters * RETURN_ROUTE_MAX_DETOUR_RATIO) {
+  // 行き・帰りは互いに依存しないので並列に取得する(検索全体の待ち時間短縮のため)
+  let [outbound, returnLeg] = await Promise.all([
+    buildSingleLeg(start, destination, null),
+    buildSingleLeg(destination, start, returnWaypoint),
+  ]);
+
+  // 迂回用waypointのせいで自転車として不自然なほど遠回りになった場合、または
+  // 帰り道の中で同じ道を行って戻るような区間ができてしまった場合は、周回よりも
+  // 安全・直接的なルートを優先し、waypoint無しで戻る経路に切り替える。
+  if (
+    returnLeg.distanceMeters > outbound.distanceMeters * RETURN_ROUTE_MAX_DETOUR_RATIO ||
+    hasSignificantBacktrack(returnLeg.path)
+  ) {
     returnLeg = await buildSingleLeg(destination, start, null);
   }
 
   const outboundDistanceKm = outbound.distanceMeters / 1000;
   const returnDistanceKm = returnLeg.distanceMeters / 1000;
 
-  const outboundProfile = await sampleElevationProfile(outbound, 0);
-  const returnProfile = await sampleElevationProfile(returnLeg, outboundDistanceKm);
+  const [outboundProfile, returnProfile] = await Promise.all([
+    sampleElevationProfile(outbound, 0),
+    sampleElevationProfile(returnLeg, outboundDistanceKm),
+  ]);
   const elevationProfile = [...outboundProfile, ...returnProfile];
 
   return {
@@ -106,4 +139,4 @@ async function buildRoundTripRoute({ start, destination }) {
   };
 }
 
-module.exports = { buildRoundTripRoute, calculateElevationGainM };
+module.exports = { buildRoundTripRoute, calculateElevationGainM, hasSignificantBacktrack };

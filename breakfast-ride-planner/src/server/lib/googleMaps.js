@@ -36,6 +36,10 @@ async function callGoogleApi(apiName, path, params) {
 }
 
 // カフェ・モーニング提供店の検索(Nearby Search)。
+// type='cafe'は指定しない: Google Places上「朝ごはん屋」等のモーニング専門店は
+// カフェではなく"restaurant"に分類されていることが多く、type=cafeで絞ると
+// そうした店舗が最初から候補プールに入らなくなる(2026-08-19、実例で確認)。
+// keywordによるテキスト関連度マッチのみで絞り込む。
 // Googleは1ページ最大20件・最大3ページ(60件)まで返す。1ページ目はGoogle側の「知名度」順の
 // ため、検索半径が広い場合は1ページ目だけだと隠れた名店等が候補プールに入らないことがある。
 // next_page_tokenがある限り(最大3ページまで)追加取得する。
@@ -43,8 +47,7 @@ async function searchNearbyCafes({ lat, lng, radiusMeters }) {
   const baseParams = {
     location: `${lat},${lng}`,
     radius: Math.min(Math.round(radiusMeters), 50000),
-    type: 'cafe',
-    keyword: 'モーニング breakfast',
+    keyword: 'モーニング breakfast 朝食 朝ごはん 朝御飯 朝ご飯',
     language: 'ja',
   };
 

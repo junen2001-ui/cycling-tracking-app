@@ -5,7 +5,7 @@ import { getSavedShops, saveShop, searchShops, unsaveShop } from '../api/client'
 
 function ShopCard({ shop, saved, onPress, onToggleSave }) {
   return (
-    <TouchableOpacity style={styles.card} onPress={() => onPress(shop)}>
+    <View style={styles.card}>
       <View style={styles.cardHeaderRow}>
         <Text style={styles.shopName}>{shop.name}</Text>
         <TouchableOpacity style={styles.saveButton} onPress={() => onToggleSave(shop)}>
@@ -35,7 +35,10 @@ function ShopCard({ shop, saved, onPress, onToggleSave }) {
           </TouchableOpacity>
         )}
       </View>
-    </TouchableOpacity>
+      <TouchableOpacity style={styles.showRouteButton} onPress={() => onPress(shop)}>
+        <Text style={styles.showRouteButtonText}>推奨ルート表示</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -197,6 +200,14 @@ const styles = StyleSheet.create({
   empty: { textAlign: 'center', color: '#888', marginTop: 32 },
   linkRow: { flexDirection: 'row', gap: 16, marginTop: 6 },
   linkText: { fontSize: 13, color: '#1e88e5', textDecorationLine: 'underline' },
+  showRouteButton: {
+    marginTop: 10,
+    paddingVertical: 10,
+    borderRadius: 6,
+    alignItems: 'center',
+    backgroundColor: '#00b34d',
+  },
+  showRouteButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
   savedToggle: { paddingVertical: 10, alignItems: 'center' },
   savedToggleText: { color: '#00b34d', fontWeight: 'bold' },
   savedList: { maxHeight: 320 },

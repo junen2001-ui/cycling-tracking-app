@@ -79,49 +79,54 @@ async function searchCandidateShops({ startLat, startLng, distanceKm, startTime 
   // 出発の曜日・日付が営業時間チェックに正しく反映される。
   const arrivalTime = new Date(startTime.getTime() + (distanceKm / CRUISING_SPEED_KMH) * 60 * 60 * 1000);
 
-  const candidates = [];
-  for (const place of preCandidates) {
-    const details = await googleMaps.getPlaceDetails(place.place_id);
-    const location = {
-      lat: place.geometry.location.lat,
-      lng: place.geometry.location.lng,
-    };
+  // 各店舗の処理(Place Details取得→DB反映→営業時間判定→ルート算出)は互いに独立しているため、
+  // 全店舗まとめて並列実行する(検索全体の待ち時間短縮のため。逐次処理だと店舗数分の
+  // Google APIラウンドトリップが直列に積み上がってしまい、特に半径が広い検索で顕著に遅かった)。
+  const candidateResults = await Promise.all(
+    preCandidates.map(async (place) => {
+      const details = await googleMaps.getPlaceDetails(place.place_id);
+      const location = {
+        lat: place.geometry.location.lat,
+        lng: place.geometry.location.lng,
+      };
 
-    const shop = await upsertShop({
-      placeId: place.place_id,
-      name: details.name || place.name,
-      location,
-      rating: details.rating ?? place.rating,
-      openingHours: details.opening_hours || null,
-      address: details.formatted_address || null,
-      website: details.website || null,
-    });
+      const shop = await upsertShop({
+        placeId: place.place_id,
+        name: details.name || place.name,
+        location,
+        rating: details.rating ?? place.rating,
+        openingHours: details.opening_hours || null,
+        address: details.formatted_address || null,
+        website: details.website || null,
+      });
 
-    const openStatus = isOpenAt(shop.opening_hours, arrivalTime);
-    if (openStatus === false) {
-      continue; // 到着予想時刻に閉店していることが明確な店舗は除外
-    }
+      const openStatus = isOpenAt(shop.opening_hours, arrivalTime);
+      if (openStatus === false) {
+        return null; // 到着予想時刻に閉店していることが明確な店舗は除外
+      }
 
-    const { elevationGainM, distanceKm: routeDistanceKm } = await ensureRouteMetricsCached(shop, start);
+      const { elevationGainM, distanceKm: routeDistanceKm } = await ensureRouteMetricsCached(shop, start);
 
-    candidates.push({
-      id: shop.id,
-      name: shop.name,
-      location,
-      distanceKm: routeDistanceKm, // 往復ルートの実距離(直線距離ではない)
-      elevationGainRoundTripM: elevationGainM,
-      rating: shop.rating,
-      hasMorningSet: shop.has_morning_set,
-      openingHoursVerified: shop.opening_hours_verified,
-      openingHoursUnknown: openStatus === null,
-      openingHoursText: formatOpeningHoursText(shop.opening_hours, arrivalTime),
-      estimatedArrivalTime: arrivalTime.toISOString(),
-      address: shop.address,
-      website: shop.website,
-      googleMapsUrl: buildGoogleMapsUrl({ lat: location.lat, lng: location.lng, placeId: shop.google_place_id }),
-      saved: shop.saved_at != null,
-    });
-  }
+      return {
+        id: shop.id,
+        name: shop.name,
+        location,
+        distanceKm: routeDistanceKm, // 往復ルートの実距離(直線距離ではない)
+        elevationGainRoundTripM: elevationGainM,
+        rating: shop.rating,
+        hasMorningSet: shop.has_morning_set,
+        openingHoursVerified: shop.opening_hours_verified,
+        openingHoursUnknown: openStatus === null,
+        openingHoursText: formatOpeningHoursText(shop.opening_hours, arrivalTime),
+        estimatedArrivalTime: arrivalTime.toISOString(),
+        address: shop.address,
+        website: shop.website,
+        googleMapsUrl: buildGoogleMapsUrl({ lat: location.lat, lng: location.lng, placeId: shop.google_place_id }),
+        saved: shop.saved_at != null,
+      };
+    })
+  );
+  const candidates = candidateResults.filter((c) => c !== null);
 
   return candidates
     // 往復ルート実距離が希望距離を超える店舗は除外する(遠い順ソートだけだと、希望より

@@ -8,9 +8,17 @@ mock.module('../lib/apiUsage.js', {
   cache: true,
   exports: { recordApiUsage: async () => {} },
 });
+// NEARBY_SEARCH_RADIUS_TIER_THRESHOLD_METERSはInfinityにして、既存のページネーション系
+// テスト(radiusMeters=25000)が半径分割(tiering)の影響を受けず単一半径のままになるようにする。
+// 半径分割自体のテストは下部の別セクションで、しきい値を下げたモックに差し替えて行う。
 mock.module('../lib/config.js', {
   cache: true,
-  exports: { NEARBY_SEARCH_MAX_PAGES: 3, NEARBY_SEARCH_PAGE_TOKEN_DELAY_MS: 1 },
+  exports: {
+    NEARBY_SEARCH_MAX_PAGES: 3,
+    NEARBY_SEARCH_PAGE_TOKEN_DELAY_MS: 1,
+    NEARBY_SEARCH_RADIUS_TIER_THRESHOLD_METERS: Infinity,
+    NEARBY_SEARCH_RADIUS_TIER_RATIOS: [0.4, 0.7],
+  },
 });
 
 process.env.GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || 'test-key';

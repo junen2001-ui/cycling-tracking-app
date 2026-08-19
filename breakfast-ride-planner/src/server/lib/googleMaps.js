@@ -1,5 +1,10 @@
 const { recordApiUsage } = require('./apiUsage');
-const { NEARBY_SEARCH_MAX_PAGES, NEARBY_SEARCH_PAGE_TOKEN_DELAY_MS } = require('./config');
+const {
+  NEARBY_SEARCH_MAX_PAGES,
+  NEARBY_SEARCH_PAGE_TOKEN_DELAY_MS,
+  NEARBY_SEARCH_RADIUS_TIER_THRESHOLD_METERS,
+  NEARBY_SEARCH_RADIUS_TIER_RATIOS,
+} = require('./config');
 
 const BASE_URL = 'https://maps.googleapis.com/maps/api';
 
@@ -35,19 +40,15 @@ async function callGoogleApi(apiName, path, params) {
   return data;
 }
 
-// カフェ・モーニング提供店の検索(Nearby Search)。
-// type='cafe'は指定しない: Google Places上「朝ごはん屋」等のモーニング専門店は
-// カフェではなく"restaurant"に分類されていることが多く、type=cafeで絞ると
-// そうした店舗が最初から候補プールに入らなくなる(2026-08-19、実例で確認)。
-// keywordによるテキスト関連度マッチのみで絞り込む。
-// Googleは1ページ最大20件・最大3ページ(60件)まで返す。1ページ目はGoogle側の「知名度」順の
-// ため、検索半径が広い場合は1ページ目だけだと隠れた名店等が候補プールに入らないことがある。
-// next_page_tokenがある限り(最大3ページまで)追加取得する。
-async function searchNearbyCafes({ lat, lng, radiusMeters }) {
+// 指定した1つの半径でNearby Searchを実行し、ページネーション(最大3ページ・60件)分を
+// まとめて返す。Googleは1ページ最大20件・最大3ページ(60件)までしか返さない仕様のため、
+// この1回の呼び出しだけでは検索半径内の全件を網羅できるとは限らない
+// (呼び出し元のsearchNearbyCafesを参照)。
+async function fetchNearbySearchPages({ lat, lng, radius, keyword }) {
   const baseParams = {
     location: `${lat},${lng}`,
-    radius: Math.min(Math.round(radiusMeters), 50000),
-    keyword: 'モーニング breakfast 朝食 朝ごはん 朝御飯 朝ご飯',
+    radius: Math.round(radius),
+    keyword,
     language: 'ja',
   };
 
@@ -67,6 +68,47 @@ async function searchNearbyCafes({ lat, lng, radiusMeters }) {
     }
   }
   return allResults;
+}
+
+// 検索半径が広い場合、フル半径1回のクエリ(60件上限)だけでは、遠方の知名度が高い
+// チェーン店等に競り負けて近場の独立系の店舗が60件の枠から漏れることがある
+// (実データで確認: 半径25kmの単一クエリには入らない店舗が、半径15〜20kmのクエリには
+// 入っていた)。しきい値を超える半径では、フル半径より小さい半径でも追加でクエリを
+// 投げ、結果をマージすることで取りこぼしを減らす(競合が少ない小さい半径のクエリの方が
+// 近場の店舗が60件の枠に残りやすいことを利用する)。
+function buildRadiusTiers(radiusMeters) {
+  if (radiusMeters <= NEARBY_SEARCH_RADIUS_TIER_THRESHOLD_METERS) {
+    return [radiusMeters];
+  }
+  const tiers = NEARBY_SEARCH_RADIUS_TIER_RATIOS.map((ratio) => Math.round(radiusMeters * ratio));
+  tiers.push(radiusMeters);
+  return tiers;
+}
+
+// カフェ・モーニング提供店の検索(Nearby Search)。
+// type='cafe'は指定しない: Google Places上「朝ごはん屋」等のモーニング専門店は
+// カフェではなく"restaurant"に分類されていることが多く、type=cafeで絞ると
+// そうした店舗が最初から候補プールに入らなくなる(2026-08-19、実例で確認)。
+// keywordによるテキスト関連度マッチのみで絞り込む。
+async function searchNearbyCafes({ lat, lng, radiusMeters }) {
+  const cappedRadius = Math.min(Math.round(radiusMeters), 50000);
+  const keyword = 'モーニング breakfast 朝食 朝ごはん 朝御飯 朝ご飯';
+  const tiers = buildRadiusTiers(cappedRadius);
+
+  // 各半径のクエリは互いに独立しているため並列に取得する
+  const tierResultsArrays = await Promise.all(
+    tiers.map((radius) => fetchNearbySearchPages({ lat, lng, radius, keyword }))
+  );
+
+  const merged = new Map();
+  for (const results of tierResultsArrays) {
+    for (const place of results) {
+      if (!merged.has(place.place_id)) {
+        merged.set(place.place_id, place);
+      }
+    }
+  }
+  return [...merged.values()];
 }
 
 // 店舗詳細を取得(Nearby Searchのレスポンスだけでは営業時間・住所・公式URLが分からないため)

@@ -44,11 +44,12 @@ async function callGoogleApi(apiName, path, params) {
 // まとめて返す。Googleは1ページ最大20件・最大3ページ(60件)までしか返さない仕様のため、
 // この1回の呼び出しだけでは検索半径内の全件を網羅できるとは限らない
 // (呼び出し元のsearchNearbyCafesを参照)。
-async function fetchNearbySearchPages({ lat, lng, radius, keyword }) {
+async function fetchNearbySearchPages({ lat, lng, radius, keyword, type }) {
   const baseParams = {
     location: `${lat},${lng}`,
     radius: Math.round(radius),
     keyword,
+    type,
     language: 'ja',
   };
 
@@ -89,16 +90,24 @@ function buildRadiusTiers(radiusMeters) {
 // type='cafe'は指定しない: Google Places上「朝ごはん屋」等のモーニング専門店は
 // カフェではなく"restaurant"に分類されていることが多く、type=cafeで絞ると
 // そうした店舗が最初から候補プールに入らなくなる(2026-08-19、実例で確認)。
-// keywordによるテキスト関連度マッチのみで絞り込む。
+//
+// keyword検索(テキスト関連度マッチ)だけでは、早朝から営業していても店名・レビュー等が
+// 「朝食/モーニング」に関連付けられていない店(例: 朝早くから営業しているラーメン店・食堂)が
+// 最初から候補プールに入らないことが実データで確認された(2026-08-20)。営業時間による
+// 絞り込みは後段(shopSearch.js)で行っているため、ここでは間口を広げてtype=restaurantのみ
+// (keyword無し)でも検索し、結果をマージする。
 async function searchNearbyCafes({ lat, lng, radiusMeters }) {
   const cappedRadius = Math.min(Math.round(radiusMeters), 50000);
   const keyword = 'モーニング breakfast 朝食 朝ごはん 朝御飯 朝ご飯';
   const tiers = buildRadiusTiers(cappedRadius);
 
-  // 各半径のクエリは互いに独立しているため並列に取得する
-  const tierResultsArrays = await Promise.all(
-    tiers.map((radius) => fetchNearbySearchPages({ lat, lng, radius, keyword }))
-  );
+  // keyword検索・type=restaurant検索は互いに独立しているため並列に取得する。
+  // 半径分割(tiering)は両方に適用し、type=restaurant側でも広い半径での
+  // 知名度による取りこぼしを防ぐ。
+  const tierResultsArrays = await Promise.all([
+    ...tiers.map((radius) => fetchNearbySearchPages({ lat, lng, radius, keyword })),
+    ...tiers.map((radius) => fetchNearbySearchPages({ lat, lng, radius, type: 'restaurant' })),
+  ]);
 
   const merged = new Map();
   for (const results of tierResultsArrays) {

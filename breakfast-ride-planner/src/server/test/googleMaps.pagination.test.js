@@ -28,18 +28,27 @@ function place(name) {
   return { place_id: name, name };
 }
 
+// searchNearbyCafesはkeyword検索とtype=restaurant検索を並列実行してマージする。
+// これらのテストはkeyword枝のページネーション挙動だけを検証したいので、type枝は
+// 常に1ページ(next_page_tokenなし)で完結させ、pagetoken付きリクエストは全てkeyword枝の
+// 続きであるとみなせるようにする。
+
 test('searchNearbyCafes: next_page_tokenがある限り追加ページを取得し結果を結合する', async (t) => {
   const originalFetch = global.fetch;
   const requestedUrls = [];
   global.fetch = async (url) => {
-    requestedUrls.push(url.toString());
-    if (requestedUrls.length === 1) {
+    const u = new URL(url.toString());
+    requestedUrls.push(u.toString());
+    if (u.searchParams.has('pagetoken')) {
+      if (u.searchParams.get('pagetoken') === 'token-2') {
+        return { json: async () => ({ status: 'OK', results: [place('page2-a')], next_page_token: 'token-3' }) };
+      }
+      return { json: async () => ({ status: 'OK', results: [place('page3-a')] }) }; // トークン無し→ここで終了
+    }
+    if (u.searchParams.has('keyword')) {
       return { json: async () => ({ status: 'OK', results: [place('page1-a'), place('page1-b')], next_page_token: 'token-2' }) };
     }
-    if (requestedUrls.length === 2) {
-      return { json: async () => ({ status: 'OK', results: [place('page2-a')], next_page_token: 'token-3' }) };
-    }
-    return { json: async () => ({ status: 'OK', results: [place('page3-a')] }) }; // トークン無し→ここで終了
+    return { json: async () => ({ status: 'OK', results: [place('type-only')] }) }; // type=restaurant枝
   };
   t.after(() => {
     global.fetch = originalFetch;
@@ -48,20 +57,29 @@ test('searchNearbyCafes: next_page_tokenがある限り追加ページを取得�
   const results = await searchNearbyCafes({ lat: 33.5, lng: 130.4, radiusMeters: 25000 });
 
   assert.deepEqual(
-    results.map((r) => r.name),
-    ['page1-a', 'page1-b', 'page2-a', 'page3-a']
+    results.map((r) => r.name).sort(),
+    ['page1-a', 'page1-b', 'page2-a', 'page3-a', 'type-only'].sort()
   );
-  assert.equal(requestedUrls.length, 3);
-  assert.ok(requestedUrls[1].includes('pagetoken=token-2'));
-  assert.ok(requestedUrls[2].includes('pagetoken=token-3'));
+  const keywordBranchUrls = requestedUrls.filter((u) => u.includes('keyword=') || u.includes('pagetoken='));
+  assert.equal(keywordBranchUrls.length, 3);
 });
 
 test('searchNearbyCafes: 最大ページ数(3)で打ち切る', async (t) => {
   const originalFetch = global.fetch;
-  let callCount = 0;
-  global.fetch = async () => {
-    callCount += 1;
-    return { json: async () => ({ status: 'OK', results: [place(`page${callCount}`)], next_page_token: `token-${callCount + 1}` }) };
+  let keywordCallCount = 0;
+  global.fetch = async (url) => {
+    const u = new URL(url.toString());
+    if (u.searchParams.has('keyword') || u.searchParams.has('pagetoken')) {
+      keywordCallCount += 1;
+      return {
+        json: async () => ({
+          status: 'OK',
+          results: [place(`page${keywordCallCount}`)],
+          next_page_token: `token-${keywordCallCount + 1}`,
+        }),
+      };
+    }
+    return { json: async () => ({ status: 'OK', results: [place('type-only')] }) }; // type=restaurant枝
   };
   t.after(() => {
     global.fetch = originalFetch;
@@ -69,16 +87,20 @@ test('searchNearbyCafes: 最大ページ数(3)で打ち切る', async (t) => {
 
   const results = await searchNearbyCafes({ lat: 33.5, lng: 130.4, radiusMeters: 25000 });
 
-  assert.equal(callCount, 3, '4ページ目以降は取得しないはず(次のトークンがあっても)');
-  assert.equal(results.length, 3);
+  assert.equal(keywordCallCount, 3, '4ページ目以降は取得しないはず(次のトークンがあっても)');
+  assert.equal(results.length, 4); // keyword枝3件 + type枝1件
 });
 
 test('searchNearbyCafes: next_page_tokenが無ければ1ページで終了する', async (t) => {
   const originalFetch = global.fetch;
-  let callCount = 0;
-  global.fetch = async () => {
-    callCount += 1;
-    return { json: async () => ({ status: 'OK', results: [place('only')] }) };
+  let keywordCallCount = 0;
+  global.fetch = async (url) => {
+    const u = new URL(url.toString());
+    if (u.searchParams.has('keyword')) {
+      keywordCallCount += 1;
+      return { json: async () => ({ status: 'OK', results: [place('only')] }) };
+    }
+    return { json: async () => ({ status: 'OK', results: [place('type-only')] }) }; // type=restaurant枝
   };
   t.after(() => {
     global.fetch = originalFetch;
@@ -86,6 +108,6 @@ test('searchNearbyCafes: next_page_tokenが無ければ1ページで終了する
 
   const results = await searchNearbyCafes({ lat: 33.5, lng: 130.4, radiusMeters: 25000 });
 
-  assert.equal(callCount, 1);
-  assert.equal(results.length, 1);
+  assert.equal(keywordCallCount, 1);
+  assert.equal(results.length, 2); // keyword枝1件 + type枝1件
 });

@@ -41,7 +41,8 @@ test('searchNearbyCafes: 半径がしきい値以下なら単一半径のみで�
 
   await searchNearbyCafes({ lat: 33.5, lng: 130.4, radiusMeters: 10000 });
 
-  assert.deepEqual(requestedRadii, ['10000']);
+  // keyword枝・type=restaurant枝がそれぞれ1回ずつ、どちらも半径10000のみ
+  assert.deepEqual(requestedRadii.sort(), ['10000', '10000']);
 });
 
 test('searchNearbyCafes: 半径がしきい値を超えると複数半径で検索し、結果をマージする', async (t) => {
@@ -66,8 +67,10 @@ test('searchNearbyCafes: 半径がしきい値を超えると複数半径で検�
 
   const results = await searchNearbyCafes({ lat: 33.5, lng: 130.4, radiusMeters: 25000 });
 
-  assert.deepEqual(requestedRadii.sort(), ['10000', '17500', '25000']);
-  // 重複(shared)は1件だけになっているはず
+  // keyword枝・type=restaurant枝がそれぞれ3半径ずつ、計6リクエスト
+  assert.equal(requestedRadii.length, 6);
+  assert.deepEqual([...new Set(requestedRadii)].sort(), ['10000', '17500', '25000']);
+  // 重複(shared、および両枝から返る分)は1件だけになっているはず
   assert.deepEqual(
     results.map((r) => r.place_id).sort(),
     ['far-a', 'mid-a', 'near-a', 'shared']

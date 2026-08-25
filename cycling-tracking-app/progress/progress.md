@@ -16,6 +16,20 @@
 ### 状態
 Metroバンドルでの検証は完了。**まだローカルビルド・実機再検証は行っていない**。次回、WSL2ローカルビルドでAPKを作成し実機確認すること。
 
+### 続き: 通信断の根本原因を追加調査、ウォッチドッグ機構を実装
+ユーザーから「19:22:30の後5分歩いているのに軌跡が全く無いのはおかしい」と指摘があり、`expo-location`のAndroidネイティブ実装(`node_modules/expo-location/android/.../taskConsumers/LocationTaskConsumer.kt`)を読み込んで追加調査した。
+
+- アプリがバックグラウンド(`mIsHostPaused == true`、画面オフ・非フォーカス状態。数日間のバックグラウンド動作の大半がこの状態)の間、位置情報はJS側へ即座に渡されず、ネイティブ側の内部バッファ(`mDeferredLocations`)に一度溜めてから報告される仕組みになっていることが判明。
+- **重要な点**: この「バッファ→報告」の処理は、OS側から位置情報がアプリに届いた"後"の話であり、そもそもOS側の位置情報取得要求(`FusedLocationProviderClient.requestLocationUpdates`)自体が停止した場合は、この処理より手前で完全に止まる。その場合JS側のコードには一切イベントが渡らず、検知も復旧もできない。
+- 複数日間の連続バックグラウンド動作の末にAndroidの省電力機能・GPSドライバ等が原因で位置情報取得要求自体が失効し、「自動送信のOFF→ON」(=位置情報リクエストの再登録)で復旧した、という推測を裏付ける材料と判断(ただし端末ログを直接確認できないため完全な断定はできない旨、ユーザーに説明済み)。
+
+**対策としてウォッチドッグ機構を追加実装**(ユーザー承諾: 電力消費への影響は軽微と判断)。
+- 非推奨の`expo-background-fetch`ではなく、後継の`expo-background-task`(Android/iOSともWorkManager/BGTaskSchedulerという各OS標準の省電力スケジューラを利用)を新規導入(`npx expo install expo-background-task`、app.jsonのpluginsに自動追加済み)。
+- 新規`src/mobile/src/location/healthCheckTask.js`: 15分間隔(APIが許容する最小値)で「最後にバックグラウンド位置情報タスクが動作した時刻」(`tokenStorage.js`の`saveLastLocationStatus`、送信の成否に関わらず毎回更新される=タスクの生存確認として使える)を確認し、10分以上更新が無ければ`startBackgroundLocationUpdates()`を呼んで位置情報リクエストを再登録する。
+- `App.js`: 自動送信ON(バックグラウンド権限あり)時に`registerHealthCheckTask()`、OFF・ログアウト・セッション切れ・フォアグラウンドのみのフォールバック時に`unregisterHealthCheckTask()`を呼ぶよう配線。
+- **性質上の制約(ユーザーに説明済み)**: `expo-background-task`の実行間隔はOS側の省電力状況次第で保証されない「目安」であり、正確に15分ごとに動く保証は無い。またアプリが完全終了(タスクキル)されている間や端末再起動中は動作しない。「数日間動かし続けた末の異常」を早期検知・復旧するための保険であり、常時確実な監視ではない点は明記しておくこと。
+- Metroバンドルでの検証は完了。**まだローカルビルド・実機検証は行っていない**。
+
 ## 2026-08-16: 2台目PCへのSSH鍵追加・本番デプロイ、アラート/滞留パネルの1行表示化
 このPC(2台目)にOracle Cloud VMへのSSH秘密鍵がまだ無かったため、**秘密鍵そのものはコピーせず、このPC用に新しい鍵ペアを生成して公開鍵だけをVMのauthorized_keysに追加登録**する方式で対応した(元のPCで`ssh -i ~/.ssh/oracle_cycling_tracking ubuntu@217.142.249.10 "echo '<公開鍵>' >> ~/.ssh/authorized_keys"`を実行してもらった)。接続確認後、2026-08-12の参加者消去機能を含む最新の`server.js`を本番デプロイ(README「10. Oracle Cloud本番バックエンドへの再デプロイ」の手順通り)。本番でも削除→`deleted:true`→DB操作で復元、まで動作確認済み。
 

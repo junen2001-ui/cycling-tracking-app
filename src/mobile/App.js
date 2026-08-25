@@ -10,6 +10,7 @@ import {
   startBackgroundLocationUpdates,
   stopBackgroundLocationUpdates,
 } from './src/location/backgroundLocationTask';
+import { registerHealthCheckTask, unregisterHealthCheckTask } from './src/location/healthCheckTask';
 import { requestForegroundPermission, requestBackgroundPermission, geolocationErrorMessage } from './src/location/permissions';
 import {
   loadCredentials,
@@ -72,6 +73,7 @@ export default function App() {
 
   const handleAuthExpired = useCallback(async () => {
     await stopBackgroundLocationUpdates();
+    await unregisterHealthCheckTask();
     stopForegroundWatch();
     closeWebSocket();
     await clearCredentials();
@@ -250,12 +252,16 @@ export default function App() {
       setBackgroundLocationNote('');
       stopForegroundWatch();
       await startBackgroundLocationUpdates();
+      // バックグラウンド位置情報タスクが長時間動かなくなった場合に自動で復旧を試みるウォッチドッグ
+      // (2026-08-25追加。フォアグラウンドのみのフォールバック時は対象外)
+      await registerHealthCheckTask();
     } else {
       setBackgroundLocationNote(
         '画面ロック中や他アプリ使用中は位置情報が送信されません。安全のため、端末の設定で位置情報を「常に許可」に変更してください(設定 > アプリ > このアプリ > 権限 > 位置情報)。'
       );
       // バックグラウンド権限が無い場合はフォアグラウンドのみのwatchPositionにフォールバックする
       await stopBackgroundLocationUpdates();
+      await unregisterHealthCheckTask();
       await startForegroundWatch();
     }
 
@@ -270,6 +276,7 @@ export default function App() {
       await beginAutoSend();
     } else {
       await stopBackgroundLocationUpdates();
+      await unregisterHealthCheckTask();
       stopForegroundWatch();
       setBackgroundLocationNote('');
     }
@@ -396,6 +403,7 @@ export default function App() {
 
   async function handleLogout() {
     await stopBackgroundLocationUpdates();
+    await unregisterHealthCheckTask();
     stopForegroundWatch();
     closeWebSocket();
     await clearCredentials();

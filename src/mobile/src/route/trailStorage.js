@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  LOCATION_SEND_INTERVAL_MS,
   LOCATION_SEND_DISTANCE_INTERVAL_M,
   STALLED_WINDOW_MS,
   STALLED_DISTANCE_THRESHOLD_M,
@@ -7,8 +8,10 @@ import {
 
 const TRAIL_POINTS_KEY = 'travel-trail-points';
 const LAST_SENT_POINT_KEY = 'travel-trail-last-sent-point';
-const RIDE_START_KEY = 'travel-trail-ride-start';
 const PREVIOUS_STALLED_KEY = 'travel-trail-previous-stalled';
+// 「直近5分の軌跡データが実際にこれだけの期間分カバーされているか」を滞留判定の
+// データ十分性チェックに使う閾値。送信間隔(1分)ぶんの余裕を持たせている。
+const MIN_HISTORY_SPAN_MS = STALLED_WINDOW_MS - LOCATION_SEND_INTERVAL_MS;
 // 想定を超える長時間セッションでの無制限な肥大化を避けるための安全弁(30秒間隔で約16時間分)
 const MAX_TRAIL_POINTS = 2000;
 
@@ -47,7 +50,7 @@ export async function loadTrailPoints() {
 
 // ログイン(新しいライドの開始)・ログアウト時に呼び、前回ライドの軌跡を持ち越さないようにする
 export async function clearTrail() {
-  await AsyncStorage.multiRemove([TRAIL_POINTS_KEY, LAST_SENT_POINT_KEY, RIDE_START_KEY, PREVIOUS_STALLED_KEY]);
+  await AsyncStorage.multiRemove([TRAIL_POINTS_KEY, LAST_SENT_POINT_KEY, PREVIOUS_STALLED_KEY]);
 }
 
 // 新しい位置情報を軌跡へ記録し、(1)サーバーへ送信すべきか、(2)滞留とみなすべきかを判定する。
@@ -62,13 +65,6 @@ export async function clearTrail() {
 export async function evaluateLocationForSending({ latitude, longitude, heading, timestamp }) {
   await appendTrailPoint({ latitude, longitude, heading, timestamp });
 
-  let rideStartRaw = await AsyncStorage.getItem(RIDE_START_KEY);
-  if (!rideStartRaw) {
-    rideStartRaw = String(timestamp);
-    await AsyncStorage.setItem(RIDE_START_KEY, rideStartRaw);
-  }
-  const rideStart = Number(rideStartRaw);
-
   const points = await loadTrailPoints();
   const windowStart = timestamp - STALLED_WINDOW_MS;
   const recentPoints = points.filter((p) => p.timestamp >= windowStart);
@@ -77,8 +73,14 @@ export async function evaluateLocationForSending({ latitude, longitude, heading,
     recentDistance += haversineMeters(recentPoints[i - 1], recentPoints[i]);
   }
 
-  // ライド開始直後(5分未満)はデータ不足で誤判定しやすいため、滞留とはみなさない
-  const hasEnoughHistory = timestamp - rideStart >= STALLED_WINDOW_MS;
+  // 「ライド開始からの経過時間」ではなく「直近5分の軌跡データが実際にどれだけ蓄積されているか」で
+  // 判定する(2026-08-25修正)。通信断からの復帰や自動送信のOFF→ONなど、新規ログインを経ない形で
+  // 追跡が再開された場合、以前は古い「ライド開始時刻」がAsyncStorageに残ったままになり、
+  // 直近の実データがほぼ無いのに「5分経過済み」の一点だけで即座に滞留と誤判定してしまっていた。
+  // 「直近5分ウィンドウ内で一番古い点が、実際にウィンドウ開始付近まで遡れているか」を見ることで、
+  // 原因を問わず(アプリ再起動・通信断・トグルOFF/ON等)頑健に判定できる。
+  const oldestRecentPoint = recentPoints[0];
+  const hasEnoughHistory = Boolean(oldestRecentPoint) && timestamp - oldestRecentPoint.timestamp >= MIN_HISTORY_SPAN_MS;
   const stalled = hasEnoughHistory && recentDistance < STALLED_DISTANCE_THRESHOLD_M;
 
   const previousStalledRaw = await AsyncStorage.getItem(PREVIOUS_STALLED_KEY);

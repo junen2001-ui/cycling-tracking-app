@@ -104,3 +104,44 @@ UPDATE participant_auth SET phone_number = regexp_replace(phone_number, '\D', ''
 -- 管理画面から参加者一覧を手動で消去する機能用(2026-08-12)。ソフトデリートとして扱い、
 -- 消去後に位置情報を受信したら自動的にNULLへ戻す(参加者自身の認証・履歴は一切消さない)。
 ALTER TABLE participants ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+-- コース制導入(2026-09-01): 短距離/中距離/長距離の3コースを独立管理する。
+-- ルート・出走時刻・ゼッケン採番接頭辞・ゴール地点(周回コース前提で出発点と同一)はコース単位。
+CREATE TABLE IF NOT EXISTS courses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug VARCHAR(20) NOT NULL UNIQUE,           -- 'short' | 'medium' | 'long'(admin.html の ?course= と一致)
+  name VARCHAR(50) NOT NULL,                  -- '短距離' | '中距離' | '長距離'
+  bib_prefix VARCHAR(5) NOT NULL,             -- ゼッケン接頭辞(例: 'S')
+  bib_digits SMALLINT NOT NULL DEFAULT 3,     -- ゼロ埋め桁数(例: 3 -> "S008")
+  start_time TIMESTAMPTZ,                     -- 管理画面が事前に設定する公式スタート時刻。未設定はNULL
+  goal_latitude DOUBLE PRECISION,             -- ルートアップロード時に自動設定(周回コース=出発点=ゴール地点)
+  goal_longitude DOUBLE PRECISION,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO courses (slug, name, bib_prefix) VALUES
+  ('short', '短距離', 'S'),
+  ('medium', '中距離', 'M'),
+  ('long', '長距離', 'L')
+ON CONFLICT (slug) DO NOTHING;
+
+ALTER TABLE participants ADD COLUMN IF NOT EXISTS course_id UUID REFERENCES courses(id);
+ALTER TABLE participants ADD COLUMN IF NOT EXISTS bib_number VARCHAR(10);
+ALTER TABLE participants ADD COLUMN IF NOT EXISTS goal_time TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_participants_course ON participants (course_id);
+
+-- (course_id, bib_number)の重複防止。ADD CONSTRAINT IF NOT EXISTSが無いため、
+-- pg_constraintを確認してから追加するガード付きDOブロックでinit-db再実行に対応する。
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_participants_course_bib') THEN
+    ALTER TABLE participants ADD CONSTRAINT uq_participants_course_bib UNIQUE (course_id, bib_number);
+  END IF;
+END $$;
+
+-- ルートもコース単位に変更。実イベント前の段階で単一ルート時代の行を保持する価値は無いため削除する。
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS course_id UUID REFERENCES courses(id);
+DELETE FROM routes WHERE course_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_routes_course_updated ON routes (course_id, updated_at DESC);

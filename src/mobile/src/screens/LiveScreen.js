@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { styles, colors } from '../styles';
 import { ORGANIZER_PHONE, INCIDENT_COOLDOWN_MS } from '../config';
+import { BUILD_TIME, APP_VERSION } from '../buildInfo';
 
 export default function LiveScreen({
   participantId,
@@ -18,6 +19,10 @@ export default function LiveScreen({
   incidentError,
   onLogout,
   onShowRouteMap,
+  courseInfoChecked,
+  courseName,
+  deviationAlert,
+  onDismissDeviationAlert,
 }) {
   const [incidentCooldownUntil, setIncidentCooldownUntil] = useState(0);
   const [incidentBusy, setIncidentBusy] = useState(false);
@@ -48,6 +53,24 @@ export default function LiveScreen({
       {offline ? (
         <View style={styles.banner}>
           <Text style={styles.bannerText}>サーバーとの接続が切れています。再接続を試みています...</Text>
+        </View>
+      ) : null}
+
+      {deviationAlert ? (
+        <Pressable style={styles.bannerDanger} onPress={onDismissDeviationAlert}>
+          <Text style={styles.bannerDangerText}>
+            コースから外れている可能性があります(直近確認: {deviationAlert.distanceFromRouteM}m)。運営本部へご連絡ください。(タップで閉じる)
+          </Text>
+        </Pressable>
+      ) : null}
+
+      {courseName ? (
+        <View style={styles.bannerSuccess}>
+          <Text style={styles.bannerSuccessText}>あなたのコースは{courseName}です</Text>
+        </View>
+      ) : courseInfoChecked ? (
+        <View style={styles.banner}>
+          <Text style={styles.bannerText}>コースが設定されていません。運営本部にお問い合わせください。</Text>
         </View>
       ) : null}
 
@@ -123,6 +146,7 @@ export default function LiveScreen({
       <Pressable style={styles.linkButton} onPress={onLogout}>
         <Text style={styles.linkButtonText}>ログアウトして電話番号を変更する</Text>
       </Pressable>
+      <Text style={styles.versionText}>Version {APP_VERSION} ({BUILD_TIME})</Text>
     </ScrollView>
   );
 }

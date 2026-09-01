@@ -1,7 +1,8 @@
 import * as TaskManager from 'expo-task-manager';
 import * as BackgroundTask from 'expo-background-task';
-import { loadCredentials, loadAutoSendEnabled, loadLastLocationStatus } from '../auth/tokenStorage';
-import { startBackgroundLocationUpdates } from './backgroundLocationTask';
+import { loadCredentials, loadAutoSendEnabled, loadLastLocationStatus, saveAutoSendEnabled } from '../auth/tokenStorage';
+import { startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from './backgroundLocationTask';
+import { isPastAutoStopTime } from './autoStop';
 
 export const HEALTH_CHECK_TASK = 'cycling-tracking-location-health-check';
 
@@ -18,6 +19,15 @@ const STALE_THRESHOLD_MS = 10 * 60 * 1000; // 10分以上タスクの動作記�
 
 TaskManager.defineTask(HEALTH_CHECK_TASK, async () => {
   try {
+    // 指定時刻を過ぎていれば、位置情報タスクが止まっていても再起動せず、
+    // ウォッチドッグ自体もここで登録解除する(2026-08-28、AUTO_STOP_HOUR_JST)。
+    if (isPastAutoStopTime()) {
+      await stopBackgroundLocationUpdates();
+      await saveAutoSendEnabled(false);
+      await unregisterHealthCheckTask();
+      return BackgroundTask.BackgroundTaskResult.Success;
+    }
+
     const { token, participantId } = await loadCredentials();
     if (!token || !participantId) {
       // ログアウト状態では何もしない

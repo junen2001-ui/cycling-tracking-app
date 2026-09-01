@@ -1,3 +1,8 @@
+// コース制導入(2026-09-01): 管理画面はURLの ?course=short のようなパラメータで
+// 1コース分に絞り込んで表示する。PC/タブレット3台でそれぞれ別のコースを開く運用を想定。
+const courseSlug = new URLSearchParams(window.location.search).get('course');
+let currentCourse = null; // {id, slug, name, startTime, goalLatitude, goalLongitude, bibPrefix, bibDigits}
+
 const map = L.map('map').setView([35.681236, 139.767125], 12);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -30,6 +35,18 @@ const importErrorEl = document.getElementById('import-error');
 const importResultEl = document.getElementById('import-result');
 const importCancelButtonEl = document.getElementById('import-cancel-button');
 const importSubmitButtonEl = document.getElementById('import-submit-button');
+const pageTitleEl = document.getElementById('page-title');
+const courseStartTimeInputEl = document.getElementById('course-start-time-input');
+const courseStartTimeSaveButtonEl = document.getElementById('course-start-time-save-button');
+const courseStartTimeNoteEl = document.getElementById('course-start-time-note');
+const deviationCountEl = document.getElementById('deviation-count');
+const deviationListEl = document.getElementById('deviation-list');
+const finishedRosterCountEl = document.getElementById('finished-roster-count');
+const finishedRosterListEl = document.getElementById('finished-roster-list');
+const exportButtonEl = document.getElementById('export-button');
+const importPhone2ColumnEl = document.getElementById('import-phone2-column');
+const importBibColumnEl = document.getElementById('import-bib-column');
+const importCourseColumnEl = document.getElementById('import-course-column');
 const restAreaButtonEl = document.getElementById('rest-area-button');
 const restAreaNoteEl = document.getElementById('rest-area-note');
 const restAreaDialogEl = document.getElementById('rest-area-dialog');
@@ -45,6 +62,77 @@ const restAreaLayers = new Map();
 let isPlacingRestArea = false;
 let pendingRestAreaCenter = null;
 let restAreaPreviewLayer = null;
+
+// JSTのdatetime-local文字列("YYYY-MM-DDTHH:mm")をISO文字列に変換する。イベントはJST限定
+// のため、ブラウザ自体のタイムゾーン設定に関わらず常にJSTとして解釈する。
+function jstDatetimeLocalToIso(value) {
+  return new Date(`${value}:00+09:00`).toISOString();
+}
+
+// ISO文字列を、datetime-local入力欄にそのまま表示できるJSTの"YYYY-MM-DDTHH:mm"形式にする。
+function isoToJstDatetimeLocal(iso) {
+  if (!iso) return '';
+  const utcMs = new Date(iso).getTime();
+  const jst = new Date(utcMs + 9 * 60 * 60 * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${jst.getUTCFullYear()}-${pad(jst.getUTCMonth() + 1)}-${pad(jst.getUTCDate())}T${pad(jst.getUTCHours())}:${pad(jst.getUTCMinutes())}`;
+}
+
+// URLの?course=を検証し、以降の初期化に必要なコース情報を確定する。不明なコース指定は
+// エラー表示のみ行い、参加者一覧・WebSocket等の初期化には進まない。
+async function initCourse() {
+  if (!courseSlug) {
+    document.body.innerHTML = '<p style="padding:24px;font-family:sans-serif;">URLに <code>?course=short</code> のようなコース指定が必要です。</p>';
+    return false;
+  }
+  try {
+    const response = await fetch('/api/courses');
+    const data = await response.json();
+    const course = data.success ? data.courses.find((c) => c.slug === courseSlug) : null;
+    if (!course) {
+      document.body.innerHTML = `<p style="padding:24px;font-family:sans-serif;">コース「${courseSlug}」が見つかりません。</p>`;
+      return false;
+    }
+    currentCourse = course;
+    document.title = `${course.name} - サイクリング追跡 管理画面`;
+    if (pageTitleEl) pageTitleEl.textContent = `${course.name} 管理画面`;
+    if (courseStartTimeInputEl) courseStartTimeInputEl.value = isoToJstDatetimeLocal(course.startTime);
+    return true;
+  } catch (error) {
+    console.error('Failed to load course info', error);
+    document.body.innerHTML = '<p style="padding:24px;font-family:sans-serif;">コース情報の取得に失敗しました。</p>';
+    return false;
+  }
+}
+
+async function saveCourseStartTime() {
+  if (!courseStartTimeInputEl.value) {
+    courseStartTimeNoteEl.textContent = '日時を入力してください。';
+    return;
+  }
+  const isoString = jstDatetimeLocalToIso(courseStartTimeInputEl.value);
+  courseStartTimeSaveButtonEl.disabled = true;
+  try {
+    const response = await fetch(`/api/courses/${courseSlug}/start-time`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ startTime: isoString }),
+    });
+    const data = await response.json();
+    if (data.success) {
+      currentCourse.startTime = data.startTime;
+      courseStartTimeNoteEl.textContent = '設定しました';
+      setTimeout(() => { courseStartTimeNoteEl.textContent = ''; }, 3000);
+    } else {
+      courseStartTimeNoteEl.textContent = data.message || '設定に失敗しました';
+    }
+  } catch (error) {
+    console.error('Failed to save course start time', error);
+    courseStartTimeNoteEl.textContent = '設定に失敗しました(通信エラー)';
+  } finally {
+    courseStartTimeSaveButtonEl.disabled = false;
+  }
+}
 
 function formatDateTime(value) {
   if (!value) return '不明';
@@ -168,6 +256,55 @@ function renderRestAreaAlert(entry) {
   updateAlertCount();
 }
 
+function updateDeviationCount() {
+  deviationCountEl.textContent = deviationListEl.querySelectorAll('.alert-card').length;
+}
+
+function clearEmptyDeviationPlaceholder() {
+  const empty = deviationListEl.querySelector('.alert-empty');
+  if (empty) empty.remove();
+}
+
+function ensureDeviationEmptyPlaceholder() {
+  if (deviationListEl.children.length === 0) {
+    deviationListEl.innerHTML = '<div class="alert-empty">現在、コース逸脱はありません</div>';
+  }
+}
+
+// 参加者1人につき1枚のカードとして扱う(継続的な逸脱で何枚も積み上がらないよう、
+// 既存のカードがあれば内容を更新するだけにする)
+function renderDeviationAlert(payload) {
+  const elementId = `deviation-${payload.participantId}`;
+  let card = document.getElementById(elementId);
+  const bodyHtml = `
+    <div class="card-body">
+      <b class="card-line">${payload.participantName || getParticipantShortName(payload.participantId)}・${payload.bibNumber || ''}・${formatTime(payload.timestamp)}・コース外${payload.distanceFromRouteM}m</b>
+    </div>
+  `;
+  if (card) {
+    card.querySelector('.card-body').outerHTML = bodyHtml;
+    return;
+  }
+
+  card = document.createElement('div');
+  card.className = 'alert-card';
+  card.id = elementId;
+  card.innerHTML = bodyHtml;
+  addDismissButton(card, () => removeDeviationCard(elementId));
+  card.addEventListener('click', () => focusParticipant(payload.participantId));
+
+  clearEmptyDeviationPlaceholder();
+  deviationListEl.prepend(card);
+  updateDeviationCount();
+}
+
+function removeDeviationCard(elementId) {
+  const card = document.getElementById(elementId);
+  if (card) card.remove();
+  ensureDeviationEmptyPlaceholder();
+  updateDeviationCount();
+}
+
 async function fetchIncidents() {
   try {
     const response = await fetch('/api/incidents');
@@ -279,71 +416,109 @@ function renderStalledList() {
   });
 }
 
+function buildRosterRow(entry, { finished }) {
+  const row = document.createElement('div');
+  row.className = 'roster-row';
+
+  if (entry.bibNumber) {
+    const bib = document.createElement('span');
+    bib.className = 'roster-bib';
+    bib.textContent = entry.bibNumber;
+    row.appendChild(bib);
+  }
+
+  const nameInput = document.createElement('input');
+  nameInput.className = 'roster-name-input';
+  nameInput.type = 'text';
+  nameInput.placeholder = '名前を入力';
+  nameInput.value = entry.displayName && entry.displayName !== 'Participant' ? entry.displayName : '';
+  nameInput.addEventListener('click', (event) => event.stopPropagation());
+  nameInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      nameInput.blur();
+    }
+  });
+  nameInput.addEventListener('blur', () => {
+    const value = nameInput.value.trim();
+    if (value && value !== entry.displayName) {
+      saveParticipantName(entry.participantId, value);
+    }
+  });
+  row.appendChild(nameInput);
+
+  const phoneInput = document.createElement('input');
+  phoneInput.className = `roster-phone-input${entry.phoneNumber ? '' : ' unset'}`;
+  phoneInput.type = 'text';
+  phoneInput.placeholder = '電話番号未登録';
+  phoneInput.value = entry.phoneNumber || '';
+  phoneInput.addEventListener('click', (event) => event.stopPropagation());
+  phoneInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      phoneInput.blur();
+    }
+  });
+  phoneInput.addEventListener('blur', () => {
+    const value = phoneInput.value.trim();
+    if (value && value !== entry.phoneNumber) {
+      savePhoneNumber(entry.participantId, value);
+    }
+  });
+  row.appendChild(phoneInput);
+
+  if (finished) {
+    const goal = document.createElement('span');
+    goal.className = 'roster-goal-time';
+    goal.textContent = `ゴール ${formatTime(entry.goalTime)}`;
+    row.appendChild(goal);
+  } else {
+    const statusClass = entry.lost ? 'lost' : entry.stalled ? 'stalled' : '';
+    const statusText = entry.lost ? 'ロスト' : entry.stalled ? '停滞中' : '稼働中';
+    const status = document.createElement('span');
+    status.className = `roster-status${statusClass ? ` ${statusClass}` : ''}`;
+    status.textContent = statusText;
+    row.appendChild(status);
+  }
+
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.className = 'dismiss-button roster-delete-button';
+  deleteButton.title = '一覧から消去';
+  deleteButton.textContent = '✕';
+  deleteButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const label = entry.displayName && entry.displayName !== 'Participant' ? entry.displayName : entry.participantId;
+    if (window.confirm(`${label} を参加者一覧から消去しますか?\n(位置情報の送信が再開されると自動的に一覧へ戻ります)`)) {
+      deleteParticipant(entry.participantId);
+    }
+  });
+  row.appendChild(deleteButton);
+
+  row.addEventListener('click', () => focusParticipant(entry.participantId));
+  return row;
+}
+
 function renderRosterList() {
   // 消去済み(deleted)の参加者はGET /api/participants自体には含まれる(参加者アプリ自身の
   // 状態表示を壊さないため)が、管理画面の一覧表示だけはここでフィルタして除外する
-  const entries = Array.from(participants.values())
+  const allEntries = Array.from(participants.values())
     .filter((entry) => !entry.deleted)
-    .sort((a, b) => (a.displayName || '').localeCompare(b.displayName || '', 'ja'));
+    .sort((a, b) => (a.bibNumber || '').localeCompare(b.bibNumber || '', 'ja') || (a.displayName || '').localeCompare(b.displayName || '', 'ja'));
 
-  rosterCountEl.textContent = entries.length;
+  const activeEntries = allEntries.filter((entry) => !entry.finished);
+  const finishedEntries = allEntries.filter((entry) => entry.finished);
 
-  if (entries.length === 0) {
-    rosterListEl.innerHTML = '<div class="roster-empty">参加者はいません</div>';
-    return;
-  }
+  rosterCountEl.textContent = activeEntries.length;
+  finishedRosterCountEl.textContent = finishedEntries.length;
 
   rosterListEl.innerHTML = '';
-  entries.forEach((entry) => {
-    const row = document.createElement('div');
-    row.className = 'roster-row';
+  if (activeEntries.length === 0) {
+    rosterListEl.innerHTML = '<div class="roster-empty">参加者はいません</div>';
+  } else {
+    activeEntries.forEach((entry) => rosterListEl.appendChild(buildRosterRow(entry, { finished: false })));
+  }
 
-    const nameInput = document.createElement('input');
-    nameInput.className = 'roster-name-input';
-    nameInput.type = 'text';
-    nameInput.placeholder = '名前を入力';
-    nameInput.value = entry.displayName && entry.displayName !== 'Participant' ? entry.displayName : '';
-    nameInput.addEventListener('click', (event) => event.stopPropagation());
-    nameInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        nameInput.blur();
-      }
-    });
-    nameInput.addEventListener('blur', () => {
-      const value = nameInput.value.trim();
-      if (value && value !== entry.displayName) {
-        saveParticipantName(entry.participantId, value);
-      }
-    });
-
-    const statusClass = entry.lost ? 'lost' : entry.stalled ? 'stalled' : '';
-    const statusText = entry.lost ? 'ロスト' : entry.stalled ? '停滞中' : '稼働中';
-    const meta = document.createElement('div');
-    meta.className = 'roster-meta';
-    meta.innerHTML = `
-      <span class="roster-phone">${entry.phoneNumber || '電話番号不明'}</span>
-      <span class="roster-status${statusClass ? ` ${statusClass}` : ''}">${statusText}</span>
-    `;
-
-    const deleteButton = document.createElement('button');
-    deleteButton.type = 'button';
-    deleteButton.className = 'dismiss-button roster-delete-button';
-    deleteButton.title = '一覧から消去';
-    deleteButton.textContent = '✕';
-    deleteButton.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const label = entry.displayName && entry.displayName !== 'Participant' ? entry.displayName : entry.participantId;
-      if (window.confirm(`${label} を参加者一覧から消去しますか?\n(位置情報の送信が再開されると自動的に一覧へ戻ります)`)) {
-        deleteParticipant(entry.participantId);
-      }
-    });
-
-    row.appendChild(nameInput);
-    row.appendChild(meta);
-    row.appendChild(deleteButton);
-    row.addEventListener('click', () => focusParticipant(entry.participantId));
-    rosterListEl.appendChild(row);
-  });
+  finishedRosterListEl.innerHTML = '';
+  finishedEntries.forEach((entry) => finishedRosterListEl.appendChild(buildRosterRow(entry, { finished: true })));
 }
 
 async function deleteParticipant(participantId) {
@@ -374,6 +549,26 @@ async function saveParticipantName(participantId, displayName) {
     }
   } catch (error) {
     console.error('Failed to save participant name', error);
+  }
+}
+
+async function savePhoneNumber(participantId, phoneNumber) {
+  try {
+    const response = await fetch(`/api/participants/${participantId}/phone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phoneNumber }),
+    });
+    const data = await response.json();
+    if (data.success) {
+      updateParticipantState(participantId, { phoneNumber: data.phoneNumber });
+    } else {
+      alert(data.message || '電話番号の登録に失敗しました。');
+      renderRosterList();
+    }
+  } catch (error) {
+    console.error('Failed to save phone number', error);
+    alert('電話番号の登録に失敗しました(通信エラー)。');
   }
 }
 
@@ -451,7 +646,7 @@ function fitMapToMarkers() {
 
 async function fetchParticipants() {
   try {
-    const response = await fetch('/api/participants');
+    const response = await fetch(`/api/participants?course=${encodeURIComponent(courseSlug)}`);
     const data = await response.json();
     if (data.success) {
       data.participants.forEach((participant) => {
@@ -460,6 +655,9 @@ async function fetchParticipants() {
         updateParticipantState(participant.id, {
           displayName: participant.display_name,
           phoneNumber: participant.phone_number || null,
+          bibNumber: participant.bib_number || null,
+          goalTime: participant.goal_time || null,
+          finished: Boolean(participant.finished),
           status: participant.status || 'active',
           stalled: participant.stalled || false,
           lost: participant.lost || false,
@@ -509,10 +707,19 @@ function setupWebSocket() {
   ws.addEventListener('message', (event) => {
     try {
       const message = JSON.parse(event.data);
+      // コース絞り込み(2026-09-01): このコース画面が把握している参加者(=fetchParticipantsで
+      // ?course=絞り込み済みのparticipants Mapに載っている人)以外のイベントは無視する。
+      // 新規参加者(participant-created)だけはまだMapに無いため、payloadのcourseSlugで判定する。
+      const knownParticipant = message.payload && message.payload.participantId
+        ? participants.has(message.payload.participantId)
+        : false;
+
       if (message.type === 'location-update' && isValidLocation(message.payload)) {
+        if (!knownParticipant) return;
         createOrUpdateMarker(message.payload);
         updateParticipantCount();
       } else if (message.type === 'participant-status-update' && message.payload) {
+        if (!knownParticipant) return;
         const marker = getMarker(message.payload.participantId);
         if (marker) {
           const popupText = `参加者: ${getParticipantLabel(message.payload.participantId)}<br>状態: ${statusLabel(message.payload.status)}<br>更新: ${formatDateTime(message.payload.recordedAt)}`;
@@ -526,39 +733,66 @@ function setupWebSocket() {
           lost: !!message.payload.lost,
         });
       } else if (message.type === 'participant-stalled-dismissed' && message.payload) {
+        if (!knownParticipant) return;
         updateParticipantState(message.payload.participantId, {
           stalledDismissedUntil: message.payload.dismissedUntil,
         });
       } else if (message.type === 'participant-name-updated' && message.payload) {
+        if (!knownParticipant) return;
         updateParticipantState(message.payload.participantId, {
           displayName: message.payload.displayName,
+          bibNumber: message.payload.bibNumber || participants.get(message.payload.participantId)?.bibNumber || null,
         });
+      } else if (message.type === 'participant-phone-updated' && message.payload) {
+        if (!knownParticipant) return;
+        updateParticipantState(message.payload.participantId, { phoneNumber: message.payload.phoneNumber });
+      } else if (message.type === 'participant-goal-reached' && message.payload) {
+        if (!knownParticipant || message.payload.courseSlug !== courseSlug) return;
+        updateParticipantState(message.payload.participantId, {
+          goalTime: message.payload.goalTime,
+          finished: true,
+        });
+      } else if (message.type === 'course-deviation' && message.payload) {
+        if (!knownParticipant || message.payload.courseSlug !== courseSlug) return;
+        renderDeviationAlert(message.payload);
       } else if (message.type === 'participant-created' && message.payload) {
-        // Excelインポートによる事前登録(まだ位置情報が無いためマーカーは作らず、一覧のみに反映)
+        // Excelインポートによる事前登録(まだ位置情報が無いためマーカーは作らず、一覧のみに反映)。
+        // このコース画面に無関係な参加者(別コース)は無視する。
+        if (message.payload.courseSlug !== courseSlug) return;
         updateParticipantState(message.payload.id, {
           displayName: message.payload.display_name,
           phoneNumber: message.payload.phone_number || null,
+          bibNumber: message.payload.bibNumber || null,
           status: message.payload.status || 'active',
           stalled: false,
         });
       } else if (message.type === 'participant-deleted' && message.payload) {
+        if (!knownParticipant) return;
         updateParticipantState(message.payload.participantId, { deleted: true });
         removeMarker(message.payload.participantId);
       } else if (message.type === 'participant-revived' && message.payload) {
+        if (!knownParticipant) return;
         // 一覧・地図への復帰そのものは、直後に届く location-update / participant-status-update で行われる
         updateParticipantState(message.payload.participantId, { deleted: false });
       } else if (message.type === 'incident-alert' && message.payload) {
+        if (!knownParticipant) return;
         renderIncidentAlert(message.payload);
       } else if (message.type === 'incident-dismissed' && message.payload) {
         removeAlertCard(`incident-${message.payload.id}`);
       } else if (message.type === 'rest-area-entry' && message.payload) {
+        if (!knownParticipant) return;
         renderRestAreaAlert(message.payload);
       } else if (message.type === 'rest-area-created' && message.payload) {
         renderRestAreaLayer(message.payload);
       } else if (message.type === 'rest-area-deleted' && message.payload) {
         removeRestAreaLayer(message.payload.id);
       } else if (message.type === 'route-updated' && message.payload && Array.isArray(message.payload.points)) {
+        if (message.payload.courseSlug !== courseSlug) return;
         renderRoute(message.payload.points.map((p) => [p.latitude, p.longitude]));
+      } else if (message.type === 'course-updated' && message.payload) {
+        if (message.payload.courseSlug !== courseSlug) return;
+        currentCourse.startTime = message.payload.startTime;
+        courseStartTimeInputEl.value = isoToJstDatetimeLocal(message.payload.startTime);
       }
     } catch (error) {
       console.error('Invalid WebSocket message', error, event.data);
@@ -812,7 +1046,7 @@ function renderRoute(points) {
 
 async function fetchRoute() {
   try {
-    const response = await fetch('/api/route');
+    const response = await fetch(`/api/route?course=${encodeURIComponent(courseSlug)}`);
     const data = await response.json();
     if (data.success && data.route && Array.isArray(data.route.points) && data.route.points.length > 0) {
       renderRoute(data.route.points.map((p) => [p.latitude, p.longitude]));
@@ -827,7 +1061,10 @@ async function saveRouteToServer(points) {
     await fetch('/api/route', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ points: points.map(([latitude, longitude]) => ({ latitude, longitude })) }),
+      body: JSON.stringify({
+        courseSlug,
+        points: points.map(([latitude, longitude]) => ({ latitude, longitude })),
+      }),
     });
   } catch (error) {
     console.error('Failed to save route to server', error);
@@ -887,9 +1124,16 @@ function populateImportColumnSelects() {
   const sampleRow = hasHeader ? importRows[1] : importRows[0];
   const columnCount = importRows.reduce((max, row) => Math.max(max, row.length), 0);
 
-  [importNameColumnEl, importPhoneColumnEl].forEach((select) => {
+  [importNameColumnEl, importPhoneColumnEl, importPhone2ColumnEl, importBibColumnEl, importCourseColumnEl].forEach((select) => {
     const previousValue = select.value;
     select.innerHTML = '';
+    // 電話番号2の列は任意項目のため、「指定しない」を選べるようにしておく
+    if (select === importPhone2ColumnEl) {
+      const noneOption = document.createElement('option');
+      noneOption.value = '';
+      noneOption.textContent = '(指定しない)';
+      select.appendChild(noneOption);
+    }
     for (let i = 0; i < columnCount; i += 1) {
       const option = document.createElement('option');
       option.value = String(i);
@@ -898,17 +1142,23 @@ function populateImportColumnSelects() {
       option.textContent = headerText ? `${columnLabel(i)}列: ${headerText}` : `${columnLabel(i)}列 (例: ${sampleText})`;
       select.appendChild(option);
     }
-    if (previousValue && Number(previousValue) < columnCount) {
+    if (previousValue && (previousValue === '' || Number(previousValue) < columnCount)) {
       select.value = previousValue;
     }
   });
 
-  // 名前・電話番号の列が推測できる場合はデフォルトで選んでおく
+  // 名前・電話番号・ゼッケン番号・コースの列が推測できる場合はデフォルトで選んでおく
   if (headerRow) {
     const nameGuess = headerRow.findIndex((cell) => typeof cell === 'string' && /名前|氏名|name/i.test(cell));
-    const phoneGuess = headerRow.findIndex((cell) => typeof cell === 'string' && /電話|tel|phone/i.test(cell));
+    const phoneGuess = headerRow.findIndex((cell) => typeof cell === 'string' && /電話.*1|tel.*1|電話|tel|phone/i.test(cell));
+    const phone2Guess = headerRow.findIndex((cell) => typeof cell === 'string' && /電話.*2|tel.*2/i.test(cell));
+    const bibGuess = headerRow.findIndex((cell) => typeof cell === 'string' && /ゼッケン|bib|no\.?$/i.test(cell));
+    const courseGuess = headerRow.findIndex((cell) => typeof cell === 'string' && /コース|course|event/i.test(cell));
     if (nameGuess >= 0) importNameColumnEl.value = String(nameGuess);
     if (phoneGuess >= 0) importPhoneColumnEl.value = String(phoneGuess);
+    if (phone2Guess >= 0) importPhone2ColumnEl.value = String(phone2Guess);
+    if (bibGuess >= 0) importBibColumnEl.value = String(bibGuess);
+    if (courseGuess >= 0) importCourseColumnEl.value = String(courseGuess);
   }
 }
 
@@ -945,10 +1195,13 @@ function handleImportFile(file) {
 async function submitImport() {
   const nameColumn = Number(importNameColumnEl.value);
   const phoneColumn = Number(importPhoneColumnEl.value);
+  const phone2Column = importPhone2ColumnEl.value === '' ? null : Number(importPhone2ColumnEl.value);
+  const bibColumn = Number(importBibColumnEl.value);
+  const courseColumn = Number(importCourseColumnEl.value);
   const hasHeader = importHasHeaderEl.checked;
 
-  if (Number.isNaN(nameColumn) || Number.isNaN(phoneColumn)) {
-    importErrorEl.textContent = '名前と電話番号の列を選択してください。';
+  if ([nameColumn, phoneColumn, bibColumn, courseColumn].some((v) => Number.isNaN(v))) {
+    importErrorEl.textContent = '名前・電話番号1・ゼッケン番号・コースの列を選択してください。';
     importErrorEl.hidden = false;
     return;
   }
@@ -956,7 +1209,10 @@ async function submitImport() {
   const dataRows = hasHeader ? importRows.slice(1) : importRows;
   const entries = dataRows.map((row) => ({
     displayName: row[nameColumn] != null ? String(row[nameColumn]) : '',
-    phoneNumber: row[phoneColumn] != null ? String(row[phoneColumn]) : '',
+    phoneNumber1: row[phoneColumn] != null ? String(row[phoneColumn]) : '',
+    phoneNumber2: phone2Column != null && row[phone2Column] != null ? String(row[phone2Column]) : '',
+    bibNumber: row[bibColumn] != null ? String(row[bibColumn]) : '',
+    courseSlug: row[courseColumn] != null ? String(row[courseColumn]) : '',
   }));
 
   importErrorEl.hidden = true;
@@ -975,7 +1231,10 @@ async function submitImport() {
       const skippedText = data.skipped.length > 0
         ? `\nスキップ: ${data.skipped.length}件\n${data.skipped.map((s) => `  ${s.row}行目: ${s.reason}`).join('\n')}`
         : '';
-      importResultEl.textContent = `更新: ${data.updated}件 / 新規登録: ${data.created}件${skippedText}`;
+      const warnedText = data.warned.length > 0
+        ? `\n警告: ${data.warned.length}件\n${data.warned.map((w) => `  ${w.row}行目: ${w.reason}${w.assignedBibNumber ? `(割当: ${w.assignedBibNumber})` : ''}`).join('\n')}`
+        : '';
+      importResultEl.textContent = `更新: ${data.updated}件 / 新規登録: ${data.created}件${warnedText}${skippedText}`;
       importResultEl.hidden = false;
       await fetchParticipants();
     } else {
@@ -991,6 +1250,24 @@ async function submitImport() {
   }
 }
 
+function exportRosterToExcel() {
+  const rows = Array.from(participants.values())
+    .filter((entry) => !entry.deleted)
+    .sort((a, b) => (a.bibNumber || '').localeCompare(b.bibNumber || '', 'ja'))
+    .map((entry) => ({
+      'ゼッケン番号': entry.bibNumber || '',
+      'コース名': currentCourse ? currentCourse.name : '',
+      '名前': entry.displayName && entry.displayName !== 'Participant' ? entry.displayName : '',
+      '電話番号': entry.phoneNumber || '',
+      'ゴール時間': entry.goalTime ? new Date(entry.goalTime).toLocaleString('ja-JP') : '',
+    }));
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, '参加者');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(workbook, `参加者一覧_${currentCourse ? currentCourse.name : courseSlug}_${dateStr}.xlsx`);
+}
+
 importButtonEl.addEventListener('click', () => importInputEl.click());
 importInputEl.addEventListener('change', () => {
   const file = importInputEl.files && importInputEl.files[0];
@@ -1002,6 +1279,8 @@ importInputEl.addEventListener('change', () => {
 importHasHeaderEl.addEventListener('change', populateImportColumnSelects);
 importCancelButtonEl.addEventListener('click', () => importDialogEl.close());
 importSubmitButtonEl.addEventListener('click', submitImport);
+exportButtonEl.addEventListener('click', exportRosterToExcel);
+courseStartTimeSaveButtonEl.addEventListener('click', saveCourseStartTime);
 
 // --- 初期表示: 現在地 ---
 
@@ -1020,6 +1299,11 @@ function tryGetCurrentPosition() {
 }
 
 async function init() {
+  const courseReady = await initCourse();
+  if (!courseReady) {
+    return;
+  }
+
   const position = await tryGetCurrentPosition();
   if (position) {
     map.setView([position.coords.latitude, position.coords.longitude], 13);

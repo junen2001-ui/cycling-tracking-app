@@ -61,11 +61,59 @@ export async function getParticipants() {
   }
 }
 
-export async function getRoute() {
+export async function getRoute(courseSlug) {
+  const qs = courseSlug ? `?course=${encodeURIComponent(courseSlug)}` : '';
   try {
-    const response = await fetch(`${API_BASE_URL}/api/route`);
+    const response = await fetch(`${API_BASE_URL}/api/route${qs}`);
     return await response.json();
   } catch (networkError) {
     return { success: false, networkError: true, message: networkError.message };
+  }
+}
+
+export async function getMyLocations(token) {
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/locations/mine`, { headers });
+  } catch (networkError) {
+    return { success: false, networkError: true, message: networkError.message };
+  }
+
+  if (response.status === 401 && authExpiredHandler) {
+    authExpiredHandler();
+  }
+
+  try {
+    return await response.json();
+  } catch (parseError) {
+    return { success: false, message: 'invalid server response' };
+  }
+}
+
+// 自分のゼッケン番号・コースを取得する(コース制導入、2026-09-01)。verify-codeのレスポンス自体には
+// 含めない — 事後のExcel再インポートや管理者による手動修正にも追従できるよう、ログイン後に
+// 毎回このエンドポイントで最新値を取得する。
+export async function getMyParticipant(token) {
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/participants/me`, { headers });
+  } catch (networkError) {
+    return { success: false, networkError: true, message: networkError.message };
+  }
+
+  if (response.status === 401 && authExpiredHandler) {
+    authExpiredHandler();
+  }
+
+  try {
+    return await response.json();
+  } catch (parseError) {
+    return { success: false, message: 'invalid server response' };
   }
 }

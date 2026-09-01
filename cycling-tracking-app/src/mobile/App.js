@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { AppState, View } from 'react-native';
+import { AppState, Vibration, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
+import { useAudioPlayer } from 'expo-audio';
 
 // TaskManager.defineTask をアプリ起動時(モジュール読み込み時)に必ず登録するため、
 // コンポーネントより先にインポートする
@@ -26,6 +27,7 @@ import {
   postLocation,
   postIncident,
   getParticipants,
+  getMyParticipant,
   setAuthExpiredHandler,
 } from './src/api/client';
 import { connectWebSocket, closeWebSocket } from './src/websocket/socket';
@@ -71,6 +73,14 @@ export default function App() {
   const [sendingLocation, setSendingLocation] = useState(false);
   const [incidentError, setIncidentError] = useState('');
 
+  // コース制導入(2026-09-01): 自分のゼッケン番号・コースの確認バナー用
+  const [courseInfoChecked, setCourseInfoChecked] = useState(false);
+  const [courseName, setCourseName] = useState('');
+  const courseSlugRef = useRef(null);
+  // コース逸脱アラート(バイブ+警告音+バナー表示)
+  const [deviationAlert, setDeviationAlert] = useState(null);
+  const deviationSoundPlayer = useAudioPlayer(require('./assets/deviation-alert.wav'));
+
   const handleAuthExpired = useCallback(async () => {
     await stopBackgroundLocationUpdates();
     await unregisterHealthCheckTask();
@@ -82,6 +92,10 @@ export default function App() {
     setParticipantId(null);
     setScreen('auth-phone');
     setDevCodeHint('');
+    setCourseInfoChecked(false);
+    setCourseName('');
+    courseSlugRef.current = null;
+    setDeviationAlert(null);
   }, []);
 
   useEffect(() => {
@@ -122,6 +136,15 @@ export default function App() {
     if (typeof mine.stalled === 'boolean') {
       setStatus(mine.stalled ? 'stalled' : 'active');
     }
+  }
+
+  // 自分のゼッケン番号・コースを取得する(コース制導入、2026-09-01)。ログイン(verify-code)
+  // のレスポンス自体には含めない設計のため、ライブ画面に入るたびに最新値を取得する。
+  async function refreshCourseInfo() {
+    const result = await getMyParticipant(tokenRef.current);
+    courseSlugRef.current = result.success ? result.participant?.courseSlug || null : null;
+    setCourseName(result.success && result.participant?.courseName ? result.participant.courseName : '');
+    setCourseInfoChecked(true);
   }
 
   // オフライン時など、初回表示だけはネットワーク往復を待たず端末内キャッシュから即座に描画する
@@ -169,6 +192,7 @@ export default function App() {
     screenRef.current = 'live';
     await refreshCachedLocationStatus();
     refreshStatusFromServer();
+    refreshCourseInfo();
 
     connectWebSocket({
       onOpen: () => setOffline(false),
@@ -176,6 +200,18 @@ export default function App() {
       onMessage: (message) => {
         if (message.type === 'participant-status-update' && message.payload?.participantId === participantIdRef.current) {
           setStatus(message.payload.stalled ? 'stalled' : 'active');
+        } else if (message.type === 'course-deviation' && message.payload?.participantId === participantIdRef.current) {
+          setDeviationAlert({
+            timestamp: message.payload.timestamp,
+            distanceFromRouteM: message.payload.distanceFromRouteM,
+          });
+          Vibration.vibrate([0, 500, 200, 500, 200, 500]);
+          try {
+            deviationSoundPlayer.seekTo(0);
+            deviationSoundPlayer.play();
+          } catch (error) {
+            // 警告音の再生に失敗してもバイブ・バナー表示は既に行っているため無視する
+          }
         }
       },
     });
@@ -401,6 +437,10 @@ export default function App() {
     }
   }
 
+  function handleDismissDeviationAlert() {
+    setDeviationAlert(null);
+  }
+
   async function handleLogout() {
     await stopBackgroundLocationUpdates();
     await unregisterHealthCheckTask();
@@ -415,6 +455,10 @@ export default function App() {
     setLocationStatusText('');
     setLocationError('');
     setPendingPhoneNumber('');
+    setCourseInfoChecked(false);
+    setCourseName('');
+    courseSlugRef.current = null;
+    setDeviationAlert(null);
     setScreen('auth-phone');
   }
 
@@ -452,9 +496,15 @@ export default function App() {
             incidentError={incidentError}
             onLogout={handleLogout}
             onShowRouteMap={() => setScreen('route-map')}
+            courseInfoChecked={courseInfoChecked}
+            courseName={courseName}
+            deviationAlert={deviationAlert}
+            onDismissDeviationAlert={handleDismissDeviationAlert}
           />
         )}
-        {screen === 'route-map' && <RouteMapScreen onBack={() => setScreen('live')} />}
+        {screen === 'route-map' && (
+          <RouteMapScreen onBack={() => setScreen('live')} token={tokenRef.current} courseSlug={courseSlugRef.current} />
+        )}
       </SafeAreaView>
     </SafeAreaProvider>
   );

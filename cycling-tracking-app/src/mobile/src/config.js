@@ -21,3 +21,9 @@ export const WS_RECONNECT_MAX_MS = 30000;
 export const INCIDENT_COOLDOWN_MS = 5000;
 
 export const BACKGROUND_LOCATION_TASK = 'cycling-tracking-background-location';
+
+// この時刻(JST、24時間表記)を過ぎたら、バックグラウンドの位置情報送信を自動的に停止する
+// (2026-08-28)。イベントごとに開催時間帯が異なるため、ビルド前にイベントの終了時刻に
+// 合わせて書き換えること。「アプリを終了してもタスクごと道連れにされず送信を継続する」
+// (killServiceOnDestroy: false)方針とセットで、消し忘れたまま何日も送信され続ける事態を防ぐ。
+export const AUTO_STOP_HOUR_JST = 20;

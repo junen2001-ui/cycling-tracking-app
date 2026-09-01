@@ -161,4 +161,32 @@ export const styles = StyleSheet.create({
     color: colors.bannerText,
     fontSize: 13,
   },
+  // コース確認バナー(緑系)・コース逸脱アラートバナー(赤系、コース制導入2026-09-01で新設)
+  bannerSuccess: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 10,
+    backgroundColor: '#e6f4ea',
+  },
+  bannerSuccessText: {
+    color: '#1e7e34',
+    fontSize: 13,
+  },
+  bannerDanger: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 10,
+    backgroundColor: '#fdecea',
+  },
+  bannerDangerText: {
+    color: '#b00020',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  versionText: {
+    color: '#999',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 16,
+  },
 });

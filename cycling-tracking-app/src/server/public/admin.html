@@ -30,6 +30,13 @@
     .status { margin-top: 4px; font-size: 0.9rem; }
     .status span { font-weight: bold; }
     .geo-note { margin-top: 4px; font-size: 0.85rem; color: #ffe6b3; }
+    .course-start-time { margin-top: 4px; font-size: 0.85rem; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .course-start-time input[type="datetime-local"] { border-radius: 4px; border: none; padding: 2px 6px; font-size: 0.85rem; }
+    .course-start-time button {
+      background: white; color: #1a73e8; border: none; border-radius: 999px;
+      padding: 2px 10px; font-size: 0.8rem; font-weight: bold; cursor: pointer;
+    }
+    .course-start-time-note { font-size: 0.8rem; }
     .gpx-button {
       background: white;
       color: #1a73e8;
@@ -142,6 +149,51 @@
     .roster-empty {
       color: #666;
       font-size: 0.95rem;
+    }
+    .roster-bib {
+      font-weight: bold;
+      color: #1a73e8;
+      font-size: 0.78rem;
+      flex-shrink: 0;
+      min-width: 2.6em;
+    }
+    .roster-phone-input {
+      flex-shrink: 0;
+      width: 9em;
+      border: 1px solid transparent;
+      background: transparent;
+      font-size: 0.72rem;
+      color: #556;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+    .roster-phone-input:hover,
+    .roster-phone-input:focus {
+      border-color: #b8c4d9;
+      background: white;
+    }
+    .roster-phone-input.unset {
+      color: #b00020;
+    }
+    .finished-roster {
+      margin-top: 8px;
+      border-top: 1px solid #e3e8f0;
+      padding-top: 6px;
+      flex-shrink: 0;
+    }
+    .finished-roster summary {
+      cursor: pointer;
+      font-weight: bold;
+      color: #556;
+      font-size: 0.85rem;
+    }
+    .finished-roster .roster-list {
+      max-height: 160px;
+      margin-top: 6px;
+    }
+    .roster-goal-time {
+      color: #1e7e34;
+      font-weight: bold;
     }
     .alert-card,
     .rest-area-card,
@@ -340,8 +392,13 @@
 <body>
   <header>
     <div class="header-main">
-      <h1>サイクリング追跡 管理画面</h1>
+      <h1 id="page-title">サイクリング追跡 管理画面</h1>
       <div class="status">通信状態: <span id="ws-status">接続中...</span> | 参加者数: <span id="participant-count">0</span></div>
+      <div class="course-start-time">
+        出走時刻(JST): <input type="datetime-local" id="course-start-time-input" />
+        <button type="button" id="course-start-time-save-button">設定</button>
+        <span id="course-start-time-note"></span>
+      </div>
       <div class="geo-note" id="geo-note" hidden></div>
       <div class="geo-note" id="rest-area-note" hidden>地図をクリックして休憩所の中心位置を指定してください(もう一度ボタンを押すとキャンセルします)</div>
     </div>
@@ -350,6 +407,7 @@
       <input type="file" id="gpx-input" accept=".gpx" hidden />
       <button class="gpx-button" id="import-button" type="button">Excelインポート</button>
       <input type="file" id="import-input" accept=".xlsx,.xls" hidden />
+      <button class="gpx-button" id="export-button" type="button">Excelエクスポート</button>
       <button class="gpx-button" id="rest-area-button" type="button">休憩所を追加</button>
     </div>
   </header>
@@ -372,6 +430,14 @@
           <div class="stalled-empty">滞留・ロスト中の参加者はいません</div>
         </div>
       </div>
+      <div class="panel">
+        <div class="panel-header">
+          コース逸脱アラート (<span id="deviation-count">0</span>)
+        </div>
+        <div id="deviation-list" class="alert-list">
+          <div class="alert-empty">現在、コース逸脱はありません</div>
+        </div>
+      </div>
       <div class="panel panel-roster">
         <div class="panel-header">
           参加者一覧 (<span id="roster-count">0</span>)
@@ -379,6 +445,10 @@
         <div id="roster-list" class="roster-list">
           <div class="roster-empty">参加者はいません</div>
         </div>
+        <details id="finished-roster-details" class="finished-roster">
+          <summary>ゴール済み (<span id="finished-roster-count">0</span>)</summary>
+          <div id="finished-roster-list" class="roster-list"></div>
+        </details>
       </div>
     </section>
   </div>
@@ -419,8 +489,20 @@
         <select id="import-name-column"></select>
       </div>
       <div class="import-field">
-        <label for="import-phone-column">電話番号の列</label>
+        <label for="import-phone-column">電話番号1の列</label>
         <select id="import-phone-column"></select>
+      </div>
+      <div class="import-field">
+        <label for="import-phone2-column">電話番号2の列(任意)</label>
+        <select id="import-phone2-column"></select>
+      </div>
+      <div class="import-field">
+        <label for="import-bib-column">ゼッケン番号の列</label>
+        <select id="import-bib-column"></select>
+      </div>
+      <div class="import-field">
+        <label for="import-course-column">コースの列</label>
+        <select id="import-course-column"></select>
       </div>
       <div id="import-error" class="import-error" hidden></div>
       <div id="import-result" class="import-result" hidden></div>

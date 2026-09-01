@@ -27,6 +27,10 @@ yarn-error.log*
 *.local
 credentials.json
 
+# 参加者の個人情報(氏名・電話番号・住所等)を含む実データ。誤ってコミットしないよう除外する
+# (cycling-tracking-app/Data/、2026-09-01追加)。
+cycling-tracking-app/Data/
+
 # OS / editor files
 .DS_Store
 Thumbs.db

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { styles } from '../styles';
+import { BUILD_TIME, APP_VERSION } from '../buildInfo';
 
 export default function AuthPhoneScreen({ onSendCode, busy }) {
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -42,6 +43,7 @@ export default function AuthPhoneScreen({ onSendCode, busy }) {
           <Text style={styles.primaryButtonText}>{busy ? '送信中...' : '認証コードを送信'}</Text>
         </Pressable>
       </View>
+      <Text style={styles.versionText}>Version {APP_VERSION} ({BUILD_TIME})</Text>
     </ScrollView>
   );
 }

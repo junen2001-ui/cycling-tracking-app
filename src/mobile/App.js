@@ -77,9 +77,23 @@ export default function App() {
   const [courseInfoChecked, setCourseInfoChecked] = useState(false);
   const [courseName, setCourseName] = useState('');
   const courseSlugRef = useRef(null);
-  // コース逸脱アラート(バイブ+警告音+バナー表示)
+  // コース逸脱アラート(バイブ+警告音+バナー表示)。警告音は気付くまで鳴り続けてほしいという
+  // ユーザー指示(2026-09-03)により、手動で閉じるかアプリをフォアグラウンドに戻すまでループ再生する。
   const [deviationAlert, setDeviationAlert] = useState(null);
   const deviationSoundPlayer = useAudioPlayer(require('./assets/deviation-alert.wav'));
+
+  useEffect(() => {
+    deviationSoundPlayer.loop = true;
+  }, [deviationSoundPlayer]);
+
+  function stopDeviationSound() {
+    try {
+      deviationSoundPlayer.pause();
+      deviationSoundPlayer.seekTo(0);
+    } catch (error) {
+      // 再生していない状態でのpause/seekToは無視してよい
+    }
+  }
 
   const handleAuthExpired = useCallback(async () => {
     await stopBackgroundLocationUpdates();
@@ -113,6 +127,11 @@ export default function App() {
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active' && screenRef.current === 'live') {
         refreshStatusFromServer();
+      }
+      // アプリをフォアグラウンドに戻した(=スマホを開いて気付いた)時点で、鳴り続けている
+      // コース逸脱の警告音を止める(バナー表示自体は手動で閉じるまで残す、2026-09-03)。
+      if (nextState === 'active') {
+        stopDeviationSound();
       }
     });
     return () => subscription.remove();
@@ -439,6 +458,7 @@ export default function App() {
 
   function handleDismissDeviationAlert() {
     setDeviationAlert(null);
+    stopDeviationSound();
   }
 
   async function handleLogout() {

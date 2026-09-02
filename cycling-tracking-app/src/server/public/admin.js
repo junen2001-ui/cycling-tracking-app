@@ -470,11 +470,12 @@ function buildRosterRow(entry, { finished }) {
     goal.className = 'roster-goal-time';
     goal.textContent = `ゴール ${formatTime(entry.goalTime)}`;
     row.appendChild(goal);
-  } else {
-    const statusClass = entry.lost ? 'lost' : entry.stalled ? 'stalled' : '';
-    const statusText = entry.lost ? 'ロスト' : entry.stalled ? '停滞中' : '稼働中';
+  } else if (entry.lost || entry.stalled) {
+    // 「稼働中」(正常時)は一覧が煩雑になるため表示しない。異常時(停滞中/ロスト)のみ表示する。
+    const statusClass = entry.lost ? 'lost' : 'stalled';
+    const statusText = entry.lost ? 'ロスト' : '停滞中';
     const status = document.createElement('span');
-    status.className = `roster-status${statusClass ? ` ${statusClass}` : ''}`;
+    status.className = `roster-status ${statusClass}`;
     status.textContent = statusText;
     row.appendChild(status);
   }

@@ -115,11 +115,36 @@ function formatBibNumber(prefix, digits, number) {
   return `${prefix}${String(number).padStart(digits, '0')}`;
 }
 
-// Excelの「コース」列は表記が不定なため、slug・コース名のどちらでも一致させる
-// (前後空白・大文字小文字は無視)。
+// 実際のエントリーシートの「コース」列(F列)は「ショートコース（気軽に楽しむ 25km）」のような
+// 説明的な表記が使われることが確認されており(2026-09-02、実データで判明)、
+// slug/コース名との完全一致は成立しない。そのためコースごとのキーワードが
+// 部分一致するかでも判定する。
+const COURSE_KEYWORD_ALIASES = {
+  short: ['ショート', 'short', '短距離', '短'],
+  medium: ['ミドル', 'middle', 'medium', '中距離', '中'],
+  long: ['ロング', 'long', '長距離', '長'],
+};
+
+// Excelの「コース」列は表記が不定なため、まずslug・コース名との完全一致
+// (前後空白・大文字小文字は無視)を試み、一致しなければキーワードの部分一致で判定する。
 function resolveCourseSlug(raw, coursesByKey) {
   if (!raw) return null;
-  return coursesByKey.get(String(raw).trim().toLowerCase()) || null;
+  const normalized = String(raw).trim().toLowerCase();
+  if (!normalized) return null;
+
+  const exact = coursesByKey.get(normalized);
+  if (exact) return exact;
+
+  const seen = new Set();
+  for (const course of coursesByKey.values()) {
+    if (seen.has(course.id)) continue;
+    seen.add(course.id);
+    const keywords = COURSE_KEYWORD_ALIASES[course.slug] || [];
+    if (keywords.some((keyword) => normalized.includes(keyword.toLowerCase()))) {
+      return course;
+    }
+  }
+  return null;
 }
 
 function getTimestampMs(value) {

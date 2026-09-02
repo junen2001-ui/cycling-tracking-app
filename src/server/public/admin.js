@@ -658,6 +658,18 @@ async function fetchParticipants() {
     const response = await fetch(`/api/participants?course=${encodeURIComponent(courseSlug)}`);
     const data = await response.json();
     if (data.success) {
+      // サーバー応答を正として、応答に含まれなくなった参加者(Excelインポートによる
+      // 総入れ替え等)はここで確実に取り除く。roster-resetのWebSocket通知に頼るだけだと、
+      // 受信タイミング次第で(再接続の隙間など)取りこぼして古いデータが残ることがあった
+      // (2026-09-03、実運用で発生を確認)。
+      const currentIds = new Set(data.participants.map((p) => p.id));
+      Array.from(participants.keys())
+        .filter((id) => !currentIds.has(id))
+        .forEach((id) => {
+          participants.delete(id);
+          removeMarker(id);
+        });
+
       data.participants.forEach((participant) => {
         // 位置情報がまだ無い参加者も一覧(参加者一覧パネル)には出したいので、
         // マーカー作成の前に必ず名前・電話番号・状態をセットしておく
@@ -690,6 +702,11 @@ async function fetchParticipants() {
           createOrUpdateMarker(entry);
         }
       });
+      // 応答が0件(例: インポート直後で該当コースの参加者がまだ無い)の場合はループが
+      // 一度も回らずrenderRosterList/renderStalledListが呼ばれないため、削除分の反映のために
+      // ここでも明示的に呼んでおく。
+      renderStalledList();
+      renderRosterList();
       updateParticipantCount();
     }
   } catch (error) {

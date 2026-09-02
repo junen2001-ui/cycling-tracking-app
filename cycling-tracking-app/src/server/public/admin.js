@@ -519,6 +519,15 @@ function renderRosterList() {
 
   finishedRosterListEl.innerHTML = '';
   finishedEntries.forEach((entry) => finishedRosterListEl.appendChild(buildRosterRow(entry, { finished: true })));
+
+  // インポートは既存の参加者データを全消去してから行う総入れ替え運用のため、ゴール済みの
+  // 参加者が1人でもいる間は誤操作防止のためボタン自体を無効化する(サーバー側にも同じ
+  // チェックがあるが、ここでは事前に気付けるようにする。2026-09-02)。
+  const hasFinished = finishedEntries.length > 0;
+  importButtonEl.disabled = hasFinished;
+  importButtonEl.title = hasFinished
+    ? 'ゴール済みの参加者がいるため、インポートはロックされています(データが全消去されるため)。'
+    : '';
 }
 
 async function deleteParticipant(participantId) {
@@ -752,6 +761,16 @@ function setupWebSocket() {
           goalTime: message.payload.goalTime,
           finished: true,
         });
+      } else if (message.type === 'roster-reset') {
+        // Excelインポートによる参加者データの総入れ替え(2026-09-02)。開いている全ての
+        // 管理画面(3コース分)で、古い参加者情報を一旦クリアする。この直後にインポート
+        // 処理から流れてくる`participant-created`で新しい内容が順次反映される。
+        markers.forEach((marker) => map.removeLayer(marker));
+        markers.clear();
+        participants.clear();
+        updateParticipantCount();
+        renderRosterList();
+        renderStalledList();
       } else if (message.type === 'course-deviation' && message.payload) {
         if (!knownParticipant || message.payload.courseSlug !== courseSlug) return;
         renderDeviationAlert(message.payload);
@@ -1203,6 +1222,15 @@ async function submitImport() {
   if ([nameColumn, phoneColumn, bibColumn, courseColumn].some((v) => Number.isNaN(v))) {
     importErrorEl.textContent = '名前・電話番号1・ゼッケン番号・コースの列を選択してください。';
     importErrorEl.hidden = false;
+    return;
+  }
+
+  // インポートは既存の参加者データを全て削除してから行う総入れ替え運用のため、
+  // 誤操作防止の確認を挟む(2026-09-02)。
+  const confirmed = window.confirm(
+    '既存の参加者データ(位置情報・緊急通知履歴・ゴール記録を含む)を全て削除して、このファイルの内容で入れ替えます。よろしいですか？'
+  );
+  if (!confirmed) {
     return;
   }
 

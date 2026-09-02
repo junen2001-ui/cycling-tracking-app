@@ -987,6 +987,23 @@ app.post('/api/participants/import-roster', async (req, res) => {
   let created = 0;
 
   try {
+    // インポートは名簿の総入れ替え運用(ユーザー指示、2026-09-02)。ゴール済みの参加者が
+    // 1人でもいる場合、当日の誤操作(位置情報履歴・緊急通知履歴・ゴール記録が
+    // 全参加者分まとめて消える)を技術的に防ぐため、インポート自体を拒否する。
+    const goalCheck = await pool.query('SELECT COUNT(*)::int AS count FROM participants WHERE goal_time IS NOT NULL');
+    if (goalCheck.rows[0].count > 0) {
+      return res.status(423).json({
+        success: false,
+        message: 'ゴール済みの参加者がいるため、インポートはロックされています(全参加者データが消去されるため)。',
+      });
+    }
+
+    // インポートは既存の参加者データを全て削除してから行う(名簿の総入れ替え運用)。
+    // ON DELETE CASCADEによりparticipant_auth/participant_locations/incidentsも連動して消える。
+    // courses/routes/rest_areasは対象外(参加者データのみ)。
+    await pool.query('DELETE FROM participants');
+    broadcastMessage({ type: 'roster-reset' });
+
     const coursesResult = await pool.query('SELECT id, slug, name, bib_prefix, bib_digits FROM courses');
     if (coursesResult.rows.length === 0) {
       return res.status(500).json({ success: false, message: 'コースが1件も登録されていません(schema.sqlの初期投入を確認してください)' });

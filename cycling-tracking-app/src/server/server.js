@@ -40,6 +40,10 @@ const participantDeviationAlerted = new Map();
 const DEVIATION_DISTANCE_M = 50;
 const DEVIATION_SUSTAINED_MS = 3 * 60 * 1000;
 
+// ゴール判定: スタート地点付近を通っただけの誤判定を避けるための最短経過時間。
+// 【要・本番前に戻す】テスト用に15分に短縮中(2026-09-03)。本来は1時間(60 * 60 * 1000)。
+const GOAL_MIN_ELAPSED_MS = 15 * 60 * 1000;
+
 function getLastLocationFromMemory(participantId) {
   return inMemoryLocations.get(participantId) || null;
 }
@@ -638,10 +642,10 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
     const insideRestArea = restAreas.length > 0;
 
     if (courseInfo && courseInfo.course_id) {
-      // ゴール判定: コースの公式スタート時刻から1時間以上経過し、かつゴール地点(周回コース
-      // なので出発点と同一)から200m以内に入ったら記録する(冪等、複数回送っても1回のみ)。
+      // ゴール判定: コースの公式スタート時刻からGOAL_MIN_ELAPSED_MS以上経過し、かつゴール地点
+      // (周回コースなので出発点と同一)から200m以内に入ったら記録する(冪等、複数回送っても1回のみ)。
       if (courseInfo.start_time && courseInfo.goal_latitude != null && courseInfo.goal_longitude != null) {
-        const elapsedOk = Date.now() >= new Date(courseInfo.start_time).getTime() + 60 * 60 * 1000;
+        const elapsedOk = Date.now() >= new Date(courseInfo.start_time).getTime() + GOAL_MIN_ELAPSED_MS;
         if (elapsedOk) {
           const distToGoal = getDistanceMeters(
             { latitude, longitude },

@@ -59,7 +59,7 @@ export default function LiveScreen({
       {deviationAlert ? (
         <Pressable style={styles.bannerDanger} onPress={onDismissDeviationAlert}>
           <Text style={styles.bannerDangerText}>
-            コースから外れている可能性があります(直近確認: {deviationAlert.distanceFromRouteM}m)。運営本部へご連絡ください。(タップで閉じる)
+            コースから外れている可能性があります(直近確認: {deviationAlert.distanceFromRouteM}m)。安全な場所を確認して、コースへお戻りください。(タップで閉じる)
           </Text>
         </Pressable>
       ) : null}

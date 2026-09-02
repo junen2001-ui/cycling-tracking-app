@@ -772,7 +772,11 @@ function setupWebSocket() {
         renderRosterList();
         renderStalledList();
       } else if (message.type === 'course-deviation' && message.payload) {
-        if (!knownParticipant || message.payload.courseSlug !== courseSlug) return;
+        // participant-createdと同様、通知対象の参加者がこの画面の一覧にまだ反映されて
+        // いなくても(読み込みタイミング次第であり得る)通知自体は見せる必要があるため、
+        // knownParticipantではなくcourseSlugのみで絞り込む(2026-09-03修正。以前は
+        // knownParticipant必須にしていたため、タイミングによって通知が握りつぶされていた)。
+        if (message.payload.courseSlug !== courseSlug) return;
         renderDeviationAlert(message.payload);
       } else if (message.type === 'participant-created' && message.payload) {
         // Excelインポートによる事前登録(まだ位置情報が無いためマーカーは作らず、一覧のみに反映)。

@@ -133,6 +133,10 @@ ALTER TABLE participants ADD COLUMN IF NOT EXISTS goal_time TIMESTAMPTZ;
 -- 二度と確認できなかった(2026-09-03、実運用で発覚)。参加者一覧から常に分かるよう、
 -- 「現在逸脱中かどうか」を参加者データ自体として永続化する(コースに戻ったらNULLに戻す)。
 ALTER TABLE participants ADD COLUMN IF NOT EXISTS deviation_alerted_at TIMESTAMPTZ;
+-- ゴール判定の誤検知対策(2026-09-03、実運用で発覚): スタート地点付近に留まっているだけの
+-- 参加者が、スタート時刻からの経過時間だけでゴール扱いされてしまっていた。「一度スタート地点
+-- (ゴール地点と同一)から半径200mの外に出たこと」を条件に加えるため、その最初の時刻を記録する。
+ALTER TABLE participants ADD COLUMN IF NOT EXISTS course_departed_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_participants_course ON participants (course_id);
 

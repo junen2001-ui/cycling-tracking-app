@@ -42,9 +42,11 @@ const participantDeviationAlerted = new Map();
 const DEVIATION_DISTANCE_M = 50;
 const DEVIATION_CONSECUTIVE_COUNT = 2;
 
-// ゴール判定: スタート地点付近を通っただけの誤判定を避けるための最短経過時間。
+// ゴール判定: スタート地点(=ゴール地点、周回コース)から一度でも出た後、この時間以上
+// 経過してから戻ってきたらゴールとみなす(スタート付近に留まっているだけの誤判定を防ぐ)。
 // 【要・本番前に戻す】テスト用に15分に短縮中(2026-09-03)。本来は1時間(60 * 60 * 1000)。
 const GOAL_MIN_ELAPSED_MS = 15 * 60 * 1000;
+const GOAL_ZONE_RADIUS_M = 200;
 
 function getLastLocationFromMemory(participantId) {
   return inMemoryLocations.get(participantId) || null;
@@ -296,6 +298,8 @@ function getParticipantsFromMemoryWithStatus() {
       course_name: null,
       goal_time: null,
       finished: false,
+      deviating: false,
+      hasParticipated: Boolean(lastLocation?.timestamp || lastLocation?.created_at),
     };
   });
 }
@@ -347,6 +351,10 @@ async function getParticipantsWithStatus(courseSlug) {
       deleted: Boolean(row.deleted_at),
       finished: Boolean(row.goal_time),
       deviating: Boolean(row.deviation_alerted_at),
+      // Excelインポートは事前登録に過ぎず、実際に参加している(位置情報を1回でも
+      // 送っている)とは限らない(2026-09-03、ユーザー指示)。管理画面の一覧・
+      // Excelエクスポートの両方で「不参加」を判別できるようにする。
+      hasParticipated: Boolean(row.last_timestamp),
     };
   });
 }
@@ -630,7 +638,7 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
     // コース制導入(2026-09-01): ゴール判定・コース逸脱判定。参加者にコースが紐付いている
     // 場合のみ実施する(未インポート・コース未設定の参加者には影響しない)。
     const courseInfoResult = await pool.query(
-      `SELECT p.course_id, p.display_name, p.bib_number, p.deviation_alerted_at,
+      `SELECT p.course_id, p.display_name, p.bib_number, p.deviation_alerted_at, p.course_departed_at,
               c.slug AS course_slug, c.start_time, c.goal_latitude, c.goal_longitude,
               r.points AS route_points
        FROM participants p
@@ -645,16 +653,31 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
     const insideRestArea = restAreas.length > 0;
 
     if (courseInfo && courseInfo.course_id) {
-      // ゴール判定: コースの公式スタート時刻からGOAL_MIN_ELAPSED_MS以上経過し、かつゴール地点
-      // (周回コースなので出発点と同一)から200m以内に入ったら記録する(冪等、複数回送っても1回のみ)。
+      // ゴール判定(2026-09-03改訂): スタート時刻を過ぎた後、①一度スタート地点(=ゴール地点、
+      // 周回コース)から半径200mの外に実際に出たことを確認し、②そこからGOAL_MIN_ELAPSED_MS
+      // 以上経過してから、③再びゴール地点から200m以内に入ったらゴールとみなす(冪等)。
+      // スタート地点付近に留まっているだけの参加者が、経過時間だけでゴール扱いされてしまう
+      // 誤判定を防ぐための変更。
       if (courseInfo.start_time && courseInfo.goal_latitude != null && courseInfo.goal_longitude != null) {
-        const elapsedOk = Date.now() >= new Date(courseInfo.start_time).getTime() + GOAL_MIN_ELAPSED_MS;
-        if (elapsedOk) {
-          const distToGoal = getDistanceMeters(
-            { latitude, longitude },
-            { latitude: courseInfo.goal_latitude, longitude: courseInfo.goal_longitude }
+        const distToGoal = getDistanceMeters(
+          { latitude, longitude },
+          { latitude: courseInfo.goal_latitude, longitude: courseInfo.goal_longitude }
+        );
+        const afterStart = Date.now() >= new Date(courseInfo.start_time).getTime();
+
+        if (!courseInfo.course_departed_at && afterStart && distToGoal > GOAL_ZONE_RADIUS_M) {
+          const departResult = await pool.query(
+            'UPDATE participants SET course_departed_at = NOW() WHERE id = $1 AND course_departed_at IS NULL RETURNING course_departed_at',
+            [participantId]
           );
-          if (distToGoal <= 200) {
+          if (departResult.rowCount > 0) {
+            courseInfo.course_departed_at = departResult.rows[0].course_departed_at;
+          }
+        }
+
+        if (courseInfo.course_departed_at) {
+          const elapsedOk = Date.now() >= new Date(courseInfo.course_departed_at).getTime() + GOAL_MIN_ELAPSED_MS;
+          if (elapsedOk && distToGoal <= GOAL_ZONE_RADIUS_M) {
             const goalResult = await pool.query(
               'UPDATE participants SET goal_time = NOW() WHERE id = $1 AND goal_time IS NULL RETURNING goal_time',
               [participantId]

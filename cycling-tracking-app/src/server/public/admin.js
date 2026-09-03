@@ -43,6 +43,8 @@ const deviationCountEl = document.getElementById('deviation-count');
 const deviationListEl = document.getElementById('deviation-list');
 const finishedRosterCountEl = document.getElementById('finished-roster-count');
 const finishedRosterListEl = document.getElementById('finished-roster-list');
+const notParticipatingCountEl = document.getElementById('not-participating-count');
+const notParticipatingListEl = document.getElementById('not-participating-list');
 const exportButtonEl = document.getElementById('export-button');
 const resetButtonEl = document.getElementById('reset-button');
 const importPhone2ColumnEl = document.getElementById('import-phone2-column');
@@ -516,11 +518,16 @@ function renderRosterList() {
     .filter((entry) => !entry.deleted)
     .sort((a, b) => (a.bibNumber || '').localeCompare(b.bibNumber || '', 'ja') || (a.displayName || '').localeCompare(b.displayName || '', 'ja'));
 
-  const activeEntries = allEntries.filter((entry) => !entry.finished);
+  // Excelインポートは事前登録に過ぎず、実際に参加しているとは限らない(2026-09-03、ユーザー
+  // 指示)。位置情報を一度も受信していない参加者は「未参加」として別枠にまとめ、参加者数にも
+  // 数えない。
   const finishedEntries = allEntries.filter((entry) => entry.finished);
+  const notParticipatingEntries = allEntries.filter((entry) => !entry.finished && !entry.hasParticipated);
+  const activeEntries = allEntries.filter((entry) => !entry.finished && entry.hasParticipated);
 
   rosterCountEl.textContent = activeEntries.length;
   finishedRosterCountEl.textContent = finishedEntries.length;
+  notParticipatingCountEl.textContent = notParticipatingEntries.length;
 
   rosterListEl.innerHTML = '';
   if (activeEntries.length === 0) {
@@ -531,6 +538,9 @@ function renderRosterList() {
 
   finishedRosterListEl.innerHTML = '';
   finishedEntries.forEach((entry) => finishedRosterListEl.appendChild(buildRosterRow(entry, { finished: true })));
+
+  notParticipatingListEl.innerHTML = '';
+  notParticipatingEntries.forEach((entry) => notParticipatingListEl.appendChild(buildRosterRow(entry, { finished: false })));
 
   // インポートは既存の参加者データを全消去してから行う総入れ替え運用のため、ゴール済みの
   // 参加者が1人でもいる間は誤操作防止のためボタン自体を無効化する(サーバー側にも同じ
@@ -701,6 +711,7 @@ async function fetchParticipants() {
           deleted: participant.deleted || false,
           recordedAt: participant.last_timestamp || null,
           stalledDismissedUntil: participant.stalled_dismissed_until || null,
+          hasParticipated: Boolean(participant.hasParticipated),
         });
 
         // アラート・インシデント(fetchIncidents)と同じく、逸脱中の参加者は画面読み込み時
@@ -774,6 +785,11 @@ function setupWebSocket() {
         if (!knownParticipant) return;
         createOrUpdateMarker(message.payload);
         updateParticipantCount();
+        // 初めて位置情報を受信した瞬間に「未参加」枠から「参加者一覧」へ即座に移す
+        // (2026-09-03。次のfetchParticipants()を待たずに反映するため)。
+        if (!participants.get(message.payload.participantId)?.hasParticipated) {
+          updateParticipantState(message.payload.participantId, { hasParticipated: true });
+        }
       } else if (message.type === 'participant-status-update' && message.payload) {
         if (!knownParticipant) return;
         const marker = getMarker(message.payload.participantId);
@@ -1382,6 +1398,9 @@ function exportRosterToExcel() {
       'コース名': currentCourse ? currentCourse.name : '',
       '名前': entry.displayName && entry.displayName !== 'Participant' ? entry.displayName : '',
       '電話番号': entry.phoneNumber || '',
+      // Excelインポートは事前登録に過ぎず、実際に参加しているとは限らないため、
+      // 参加状況を明示する列を追加する(2026-09-03、ユーザー指示)。
+      '参加状況': entry.finished ? 'ゴール済み' : entry.hasParticipated ? '参加中' : '不参加',
       'ゴール時間': entry.goalTime ? new Date(entry.goalTime).toLocaleString('ja-JP') : '',
     }));
   const worksheet = XLSX.utils.json_to_sheet(rows);

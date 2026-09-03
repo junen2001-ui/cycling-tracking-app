@@ -129,6 +129,10 @@ ON CONFLICT (slug) DO NOTHING;
 ALTER TABLE participants ADD COLUMN IF NOT EXISTS course_id UUID REFERENCES courses(id);
 ALTER TABLE participants ADD COLUMN IF NOT EXISTS bib_number VARCHAR(10);
 ALTER TABLE participants ADD COLUMN IF NOT EXISTS goal_time TIMESTAMPTZ;
+-- コース逸脱の通知はWebSocketの一過性イベントのみで、管理画面がその瞬間開いていないと
+-- 二度と確認できなかった(2026-09-03、実運用で発覚)。参加者一覧から常に分かるよう、
+-- 「現在逸脱中かどうか」を参加者データ自体として永続化する(コースに戻ったらNULLに戻す)。
+ALTER TABLE participants ADD COLUMN IF NOT EXISTS deviation_alerted_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_participants_course ON participants (course_id);
 

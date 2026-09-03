@@ -4,6 +4,7 @@ import { AppState, Vibration, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { useAudioPlayer } from 'expo-audio';
+import { setupDeviationNotifications, notifyDeviation } from './src/notifications/deviationNotification';
 
 // TaskManager.defineTask をアプリ起動時(モジュール読み込み時)に必ず登録するため、
 // コンポーネントより先にインポートする
@@ -191,6 +192,9 @@ export default function App() {
       // このReactコンポーネントのマウントを経由しないため、通常のバックグラウンド動作中の
       // 軌跡はここでは消えない。
       await clearTrail();
+      // コース逸脱通知用のチャンネル作成+通知許可のリクエスト(2026-09-03)。ログイン前でも
+      // 一度だけ済ませておく。
+      await setupDeviationNotifications();
 
       const { token, participantId: storedParticipantId } = await loadCredentials();
       if (token && storedParticipantId) {
@@ -225,6 +229,7 @@ export default function App() {
             distanceFromRouteM: message.payload.distanceFromRouteM,
           });
           Vibration.vibrate([0, 500, 200, 500, 200, 500]);
+          notifyDeviation(message.payload.distanceFromRouteM);
           try {
             deviationSoundPlayer.seekTo(0);
             deviationSoundPlayer.play();

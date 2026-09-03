@@ -834,6 +834,13 @@ function setupWebSocket() {
         if (participants.has(message.payload.participantId)) {
           updateParticipantState(message.payload.participantId, { deviating: false });
         }
+        // ロースター側のバッジ(deviating状態)は上のupdateParticipantStateで消えるが、
+        // 通知パネル側のカードは別要素のため、ここで明示的に消さないと残り続けてしまっていた
+        // (2026-09-03に発覚。ゴールに戻っても管理画面の「コース逸脱中」表示が消えないバグ)。
+        const elementId = `deviation-${message.payload.participantId}`;
+        if (document.getElementById(elementId)) {
+          removeDeviationCard(elementId);
+        }
       } else if (message.type === 'participant-created' && message.payload) {
         // Excelインポートによる事前登録(まだ位置情報が無いためマーカーは作らず、一覧のみに反映)。
         // このコース画面に無関係な参加者(別コース)は無視する。

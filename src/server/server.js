@@ -35,10 +35,12 @@ const STALLED_CHECK_INTERVAL_MS = 30 * 1000;
 
 // コース逸脱アラート用の状態(2026-09-01、コース制導入)。DBを介さずメモリ保持で十分
 // (サーバー再起動をまたいで継続監視する必要は無い一過性の状態のため)。
-const participantDeviationSince = new Map();
+// 判定方式は時間経過(◯分継続)ではなく、連続何回の送信で閾値を超えたかで判定する
+// (2026-09-03、実機テストのため変更。送信間隔短縮に伴い検出を早めるのが狙い)。
+const participantDeviationConsecutiveCount = new Map();
 const participantDeviationAlerted = new Map();
 const DEVIATION_DISTANCE_M = 50;
-const DEVIATION_SUSTAINED_MS = 3 * 60 * 1000;
+const DEVIATION_CONSECUTIVE_COUNT = 2;
 
 // ゴール判定: スタート地点付近を通っただけの誤判定を避けるための最短経過時間。
 // 【要・本番前に戻す】テスト用に15分に短縮中(2026-09-03)。本来は1時間(60 * 60 * 1000)。
@@ -680,7 +682,7 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
         const distFromRoute = distanceToPolylineMeters({ latitude, longitude }, routePoints);
         const isDeviating = Number.isFinite(distFromRoute) && distFromRoute > DEVIATION_DISTANCE_M;
         if (!isDeviating || insideRestArea) {
-          participantDeviationSince.delete(participantId);
+          participantDeviationConsecutiveCount.delete(participantId);
           participantDeviationAlerted.delete(participantId);
           // コースに戻った(または休憩所に入った)ので、永続化していた逸脱中フラグも解除する。
           // 通知が飛んだ瞬間に管理画面を見ていなくても、参加者一覧を見れば「現在は逸脱中か」が
@@ -694,12 +696,9 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
           }
         } else {
           const clientTimestamp = timestamp || new Date().toISOString();
-          if (!participantDeviationSince.has(participantId)) {
-            participantDeviationSince.set(participantId, clientTimestamp);
-          }
-          const sinceMs = getTimestampMs(participantDeviationSince.get(participantId));
-          const sustainedMs = getTimestampMs(clientTimestamp) - sinceMs;
-          if (sustainedMs >= DEVIATION_SUSTAINED_MS && !participantDeviationAlerted.get(participantId)) {
+          const consecutiveCount = (participantDeviationConsecutiveCount.get(participantId) || 0) + 1;
+          participantDeviationConsecutiveCount.set(participantId, consecutiveCount);
+          if (consecutiveCount >= DEVIATION_CONSECUTIVE_COUNT && !participantDeviationAlerted.get(participantId)) {
             participantDeviationAlerted.set(participantId, true);
             await pool.query('UPDATE participants SET deviation_alerted_at = NOW() WHERE id = $1', [participantId]);
             broadcastMessage({

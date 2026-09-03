@@ -47,6 +47,16 @@
       font-weight: bold;
       cursor: pointer;
     }
+    .danger-button {
+      background: white;
+      color: #b00020;
+      border: none;
+      border-radius: 999px;
+      padding: 8px 16px;
+      font-size: 0.9rem;
+      font-weight: bold;
+      cursor: pointer;
+    }
     .panels {
       display: flex;
       flex-direction: column;
@@ -414,6 +424,7 @@
       <input type="file" id="import-input" accept=".xlsx,.xls" hidden />
       <button class="gpx-button" id="export-button" type="button">Excelエクスポート</button>
       <button class="gpx-button" id="rest-area-button" type="button">休憩所を追加</button>
+      <button class="danger-button" id="reset-button" type="button" title="テスト用: 全参加者データ(位置情報・緊急通知履歴・ゴール記録を含む)を消去します">全参加者データをリセット</button>
     </div>
   </header>
   <div class="main-content">

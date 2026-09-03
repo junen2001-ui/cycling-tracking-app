@@ -979,6 +979,25 @@ app.post('/api/participants/:id/name', async (req, res) => {
   return res.json({ success: true, participantId, displayName: trimmedName });
 });
 
+// テスト運用向け(2026-09-03): ゴール済みの参加者がいるとインポートがロックされる
+// (下の import-roster 参照)ため、繰り返しテストする際に手詰まりになってしまう。
+// Excelを用意しなくても全参加者データを消去できるようにする「全消去リセット」。
+// import-roster と同じ範囲(参加者・認証・位置情報履歴・緊急通知履歴、全コース共通)を
+// 消去する。ゴールロックの対象にはならない(ロックを解除するための機能のため)。
+app.post('/api/participants/reset', async (req, res) => {
+  if (!pool) {
+    return res.status(500).json({ success: false, message: 'DATABASE_URL is not configured' });
+  }
+  try {
+    const result = await pool.query('DELETE FROM participants');
+    broadcastMessage({ type: 'roster-reset' });
+    return res.json({ success: true, deletedCount: result.rowCount });
+  } catch (error) {
+    console.error('Failed to reset participants:', error);
+    return res.status(500).json({ success: false, message: error.message || 'reset failed' });
+  }
+});
+
 // コース制導入(2026-09-01)にあわせて大幅拡張。参加者の同一性は「電話番号」ではなく
 // 「コース+ゼッケン番号」で判定する。実データ(前回イベント435件)を検証したところ、
 // 家族分をまとめて申し込む際に代表者の電話番号を複数人分に入力するケースが15%程度あり、

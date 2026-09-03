@@ -44,6 +44,7 @@ const deviationListEl = document.getElementById('deviation-list');
 const finishedRosterCountEl = document.getElementById('finished-roster-count');
 const finishedRosterListEl = document.getElementById('finished-roster-list');
 const exportButtonEl = document.getElementById('export-button');
+const resetButtonEl = document.getElementById('reset-button');
 const importPhone2ColumnEl = document.getElementById('import-phone2-column');
 const importBibColumnEl = document.getElementById('import-bib-column');
 const importCourseColumnEl = document.getElementById('import-course-column');
@@ -1345,6 +1346,33 @@ async function submitImport() {
   }
 }
 
+// テスト運用向け(2026-09-03): ゴール済みの参加者がいるとExcelインポートがロックされ、
+// 繰り返しテストする際に手詰まりになるための「全消去リセット」。
+async function resetAllParticipants() {
+  const confirmed = window.confirm(
+    '【テスト用】全参加者データ(位置情報・緊急通知履歴・ゴール記録を含む、全コース分)を消去します。元に戻せません。よろしいですか？'
+  );
+  if (!confirmed) {
+    return;
+  }
+  resetButtonEl.disabled = true;
+  try {
+    const response = await fetch('/api/participants/reset', { method: 'POST' });
+    const data = await response.json();
+    if (data.success) {
+      await fetchParticipants();
+      alert(`リセットしました(${data.deletedCount}件削除)。`);
+    } else {
+      alert(data.message || 'リセットに失敗しました。');
+    }
+  } catch (error) {
+    console.error('Failed to reset participants', error);
+    alert('リセットに失敗しました(通信エラー)。');
+  } finally {
+    resetButtonEl.disabled = false;
+  }
+}
+
 function exportRosterToExcel() {
   const rows = Array.from(participants.values())
     .filter((entry) => !entry.deleted)
@@ -1375,6 +1403,7 @@ importHasHeaderEl.addEventListener('change', populateImportColumnSelects);
 importCancelButtonEl.addEventListener('click', () => importDialogEl.close());
 importSubmitButtonEl.addEventListener('click', submitImport);
 exportButtonEl.addEventListener('click', exportRosterToExcel);
+resetButtonEl.addEventListener('click', resetAllParticipants);
 courseStartTimeSaveButtonEl.addEventListener('click', saveCourseStartTime);
 
 // --- 初期表示: 現在地 ---

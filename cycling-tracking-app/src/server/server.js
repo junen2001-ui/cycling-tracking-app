@@ -306,7 +306,7 @@ async function getParticipantsWithStatus(courseSlug) {
   const [result, restAreas] = await Promise.all([
     pool.query(
       `SELECT p.id, p.display_name, p.status, p.created_at, p.stalled_dismissed_until, p.deleted_at,
-              p.bib_number, p.course_id, p.goal_time,
+              p.bib_number, p.course_id, p.goal_time, p.deviation_alerted_at,
               c.slug AS course_slug, c.name AS course_name,
               a.phone_number,
               l.latitude AS last_latitude,
@@ -344,6 +344,7 @@ async function getParticipantsWithStatus(courseSlug) {
       lost: status === 'lost',
       deleted: Boolean(row.deleted_at),
       finished: Boolean(row.goal_time),
+      deviating: Boolean(row.deviation_alerted_at),
     };
   });
 }
@@ -627,7 +628,7 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
     // コース制導入(2026-09-01): ゴール判定・コース逸脱判定。参加者にコースが紐付いている
     // 場合のみ実施する(未インポート・コース未設定の参加者には影響しない)。
     const courseInfoResult = await pool.query(
-      `SELECT p.course_id, p.display_name, p.bib_number,
+      `SELECT p.course_id, p.display_name, p.bib_number, p.deviation_alerted_at,
               c.slug AS course_slug, c.start_time, c.goal_latitude, c.goal_longitude,
               r.points AS route_points
        FROM participants p
@@ -681,6 +682,16 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
         if (!isDeviating || insideRestArea) {
           participantDeviationSince.delete(participantId);
           participantDeviationAlerted.delete(participantId);
+          // コースに戻った(または休憩所に入った)ので、永続化していた逸脱中フラグも解除する。
+          // 通知が飛んだ瞬間に管理画面を見ていなくても、参加者一覧を見れば「現在は逸脱中か」が
+          // 常に分かるようにするための状態(2026-09-03)。既に解除済みなら無駄な書き込みをしない。
+          if (courseInfo.deviation_alerted_at) {
+            await pool.query('UPDATE participants SET deviation_alerted_at = NULL WHERE id = $1', [participantId]);
+            broadcastMessage({
+              type: 'course-deviation-cleared',
+              payload: { participantId, courseSlug: courseInfo.course_slug },
+            });
+          }
         } else {
           const clientTimestamp = timestamp || new Date().toISOString();
           if (!participantDeviationSince.has(participantId)) {
@@ -690,6 +701,7 @@ app.post('/api/locations', authMiddleware, async (req, res) => {
           const sustainedMs = getTimestampMs(clientTimestamp) - sinceMs;
           if (sustainedMs >= DEVIATION_SUSTAINED_MS && !participantDeviationAlerted.get(participantId)) {
             participantDeviationAlerted.set(participantId, true);
+            await pool.query('UPDATE participants SET deviation_alerted_at = NOW() WHERE id = $1', [participantId]);
             broadcastMessage({
               type: 'course-deviation',
               payload: {

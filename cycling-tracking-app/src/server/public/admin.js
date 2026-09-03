@@ -276,9 +276,10 @@ function ensureDeviationEmptyPlaceholder() {
 function renderDeviationAlert(payload) {
   const elementId = `deviation-${payload.participantId}`;
   let card = document.getElementById(elementId);
+  const distanceText = Number.isFinite(payload.distanceFromRouteM) ? `・コース外${payload.distanceFromRouteM}m` : '';
   const bodyHtml = `
     <div class="card-body">
-      <b class="card-line">${payload.participantName || getParticipantShortName(payload.participantId)}・${payload.bibNumber || ''}・${formatTime(payload.timestamp)}・コース外${payload.distanceFromRouteM}m</b>
+      <b class="card-line">${payload.participantName || getParticipantShortName(payload.participantId)}・${payload.bibNumber || ''}・${formatTime(payload.timestamp)}${distanceText}</b>
     </div>
   `;
   if (card) {
@@ -480,6 +481,15 @@ function buildRosterRow(entry, { finished }) {
     row.appendChild(status);
   }
 
+  if (!finished && entry.deviating) {
+    // コース逸脱は上の稼働中/停滞中/ロストとは独立した状態(逸脱しながら移動していることも
+    // あり得る)なので、別バッジとして表示する。コースに戻るまで消えない(2026-09-03)。
+    const deviating = document.createElement('span');
+    deviating.className = 'roster-status deviating';
+    deviating.textContent = 'コース逸脱中';
+    row.appendChild(deviating);
+  }
+
   const deleteButton = document.createElement('button');
   deleteButton.type = 'button';
   deleteButton.className = 'dismiss-button roster-delete-button';
@@ -669,6 +679,9 @@ async function fetchParticipants() {
         .forEach((id) => {
           participants.delete(id);
           removeMarker(id);
+          if (document.getElementById(`deviation-${id}`)) {
+            removeDeviationCard(`deviation-${id}`);
+          }
         });
 
       data.participants.forEach((participant) => {
@@ -683,10 +696,25 @@ async function fetchParticipants() {
           status: participant.status || 'active',
           stalled: participant.stalled || false,
           lost: participant.lost || false,
+          deviating: Boolean(participant.deviating),
           deleted: participant.deleted || false,
           recordedAt: participant.last_timestamp || null,
           stalledDismissedUntil: participant.stalled_dismissed_until || null,
         });
+
+        // アラート・インシデント(fetchIncidents)と同じく、逸脱中の参加者は画面読み込み時
+        // (通知を見逃した後の再読み込みを含む)にも通知パネルへ反映する。既にコースへ
+        // 戻っていればカードを消す(2026-09-03)。
+        if (participant.deviating) {
+          renderDeviationAlert({
+            participantId: participant.id,
+            participantName: participant.display_name,
+            bibNumber: participant.bib_number,
+            timestamp: participant.deviation_alerted_at,
+          });
+        } else if (document.getElementById(`deviation-${participant.id}`)) {
+          removeDeviationCard(`deviation-${participant.id}`);
+        }
 
         const entry = {
           participantId: participant.id,
@@ -796,6 +824,16 @@ function setupWebSocket() {
         // knownParticipant必須にしていたため、タイミングによって通知が握りつぶされていた)。
         if (message.payload.courseSlug !== courseSlug) return;
         renderDeviationAlert(message.payload);
+        // 通知パネルへの表示に加え、参加者一覧にも永続的なバッジとして反映する
+        // (2026-09-03。通知が飛んだ瞬間を見逃しても一覧を見れば分かるようにするため)。
+        if (participants.has(message.payload.participantId)) {
+          updateParticipantState(message.payload.participantId, { deviating: true });
+        }
+      } else if (message.type === 'course-deviation-cleared' && message.payload) {
+        if (message.payload.courseSlug !== courseSlug) return;
+        if (participants.has(message.payload.participantId)) {
+          updateParticipantState(message.payload.participantId, { deviating: false });
+        }
       } else if (message.type === 'participant-created' && message.payload) {
         // Excelインポートによる事前登録(まだ位置情報が無いためマーカーは作らず、一覧のみに反映)。
         // このコース画面に無関係な参加者(別コース)は無視する。

@@ -60,7 +60,8 @@
           "androidGoogleMapsApiKey": "AIzaSyD6oZr0kmc4OdLpphSRd0cHhEDqsPQZgLE"
         }
       ],
-      "expo-background-task"
+      "expo-background-task",
+      "expo-notifications"
     ],
     "extra": {
       "eas": {
